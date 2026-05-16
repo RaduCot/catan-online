@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Catan Online</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #1b3a5b; overflow: hidden; font-family: system-ui, sans-serif; color: #eee; }
+      #app { position: fixed; inset: 0; }
+      canvas { display: block; width: 100%; height: 100%; }
+      #hud {
+        position: fixed; top: 8px; left: 8px; padding: 8px 10px;
+        background: rgba(0,0,0,0.45); border-radius: 6px; font-size: 13px;
+        display: flex; gap: 10px; align-items: center;
+      }
+      #hud input { width: 100px; }
+      #hud label { display: flex; gap: 4px; align-items: center; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="board"></canvas>
+    </div>
+    <div id="hud">
+      <label>seed <input id="seed" type="number" value="1337" /></label>
+      <label>radius <input id="radius" type="number" min="1" max="6" value="0" placeholder="auto" /></label>
+      <label>img scale <input id="imgScale" type="number" step="0.01" value="1.08" /></label>
+      <button id="regen">regen</button>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
