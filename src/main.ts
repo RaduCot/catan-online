@@ -116,6 +116,7 @@ async function main() {
   const ruleGuaranteed68Input = document.getElementById("ruleGuaranteed68") as HTMLInputElement;
   const rollBtn = document.getElementById("roll-toggle") as HTMLButtonElement;
   const endTurnBtn = document.getElementById("end-turn-btn") as HTMLButtonElement;
+  const startMatchBtn = document.getElementById("start-match-btn") as HTMLButtonElement;
   const numScaleInput = document.getElementById("numScale") as HTMLInputElement;
   const numOffXInput = document.getElementById("numOffX") as HTMLInputElement;
   const numOffYInput = document.getElementById("numOffY") as HTMLInputElement;
@@ -543,7 +544,6 @@ async function main() {
     refreshPassivesAndTrade();
     refreshPlayerStrip();
     refreshTopButtons();
-    openPreMatchModal();
   }
 
   function regen() {
@@ -1172,7 +1172,14 @@ async function main() {
     rollBtn.disabled = phase !== "roll";
     endTurnBtn.disabled = phase !== "main";
     tradeToggleBtn.disabled = !(phase === "main" && getActivePlayerId() === getViewerPlayerId());
+    // Start-match is only available pre-match (sandbox). Once the match is
+    // running, hide it so the player can't kick off a duplicate pre-match.
+    startMatchBtn.style.display = phase === "pre-match" ? "" : "none";
   };
+
+  startMatchBtn.addEventListener("click", () => {
+    openPreMatchModal();
+  });
 
   // --- Pre-match modal ---
   function renderPreMatchRows() {
@@ -1281,8 +1288,8 @@ async function main() {
   refreshPlayerStrip();
   refreshTopButtons();
 
-  // Kick off the first pre-match modal once everything is mounted.
-  openPreMatchModal();
+  // Sandbox by default — user clicks "start match" to begin the pre-match
+  // dice roll. resetTurnState() leaves us in "pre-match" phase.
 
   resize();
   console.log(`board: seed=${board.seed} radius=${board.radius} tiles=${board.tiles.length}`);
