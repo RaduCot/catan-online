@@ -7,8 +7,9 @@ export type HexLayout = {
 };
 
 export function axialToPixel(h: Axial, layout: HexLayout): { x: number; y: number } {
-  const x = layout.size * (1.5 * h.q);
-  const y = layout.size * (Math.sqrt(3) * (h.r + h.q / 2));
+  // pointy-top hex axial->pixel
+  const x = layout.size * Math.sqrt(3) * (h.q + h.r / 2);
+  const y = layout.size * 1.5 * h.r;
   return { x: x + layout.originX, y: y + layout.originY };
 }
 
@@ -28,8 +29,8 @@ export function tilesForRadius(radius: number): number {
 
 export function hexBounds(hexes: Axial[], layout: HexLayout) {
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  const w = 2 * layout.size;
-  const h = Math.sqrt(3) * layout.size;
+  const w = Math.sqrt(3) * layout.size;
+  const h = 2 * layout.size;
   for (const hex of hexes) {
     const { x, y } = axialToPixel(hex, layout);
     minX = Math.min(minX, x - w / 2);

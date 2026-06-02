@@ -9,12 +9,258 @@
       #app { position: fixed; inset: 0; }
       canvas { display: block; width: 100%; height: 100%; }
       #hud {
-        position: fixed; top: 8px; left: 8px; padding: 8px 10px;
-        background: rgba(0,0,0,0.45); border-radius: 6px; font-size: 13px;
-        display: flex; gap: 10px; align-items: center;
+        position: fixed; top: 8px; left: 8px; font-size: 13px; z-index: 10;
+        display: flex; flex-direction: column; gap: 6px; align-items: flex-start;
       }
-      #hud input { width: 100px; }
-      #hud label { display: flex; gap: 4px; align-items: center; }
+      #hud-toggle, #reveal-toggle, #roll-toggle {
+        background: rgba(0,0,0,0.6); color: #eee; border: 1px solid rgba(255,255,255,0.15);
+        border-radius: 6px; padding: 6px 10px; cursor: pointer; font: inherit;
+      }
+      #reveal-toggle.active { background: rgba(80,140,200,0.85); }
+      #hud-panel {
+        background: rgba(0,0,0,0.55); border-radius: 6px; padding: 6px 8px;
+        display: flex; flex-direction: column; gap: 2px;
+        max-height: calc(100vh - 60px); overflow-y: auto;
+      }
+      #hud-panel.hidden { display: none; }
+      #hud-panel details { border-top: 1px solid rgba(255,255,255,0.08); }
+      #hud-panel details:first-child { border-top: none; }
+      #hud-panel summary {
+        cursor: pointer; padding: 6px 2px; list-style: none; font-weight: 600;
+        opacity: 0.9; user-select: none;
+      }
+      #hud-panel summary::-webkit-details-marker { display: none; }
+      #hud-panel summary::before {
+        content: "▸"; display: inline-block; width: 12px; transition: transform 0.1s;
+      }
+      #hud-panel details[open] > summary::before { transform: rotate(90deg); }
+      #hud-panel .group { display: flex; flex-direction: column; gap: 6px; padding: 4px 0 8px 14px; }
+      #hud-panel label { display: flex; align-items: center; gap: 10px; }
+      #hud-panel .lbl { width: 72px; }
+      #hud-panel input, #hud-panel select { width: 110px; box-sizing: border-box; }
+      #hud-panel button { font: inherit; cursor: pointer; }
+      #regen { padding: 0; margin-left: 4px; line-height: 1; font-size: 16px; background: transparent; border: none; color: inherit; }
+      #regen:hover { filter: brightness(1.2); }
+
+      #resource-hud {
+        display: flex; gap: 6px;
+        background: rgba(0, 0, 0, 0.6);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        padding: 8px 10px;
+        backdrop-filter: blur(6px);
+        -webkit-backdrop-filter: blur(6px);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+        user-select: none;
+      }
+      #resource-hud .res {
+        display: flex; flex-direction: column; align-items: center;
+        min-width: 52px; padding: 4px 6px; border-radius: 8px;
+        transition: background 0.15s;
+      }
+      #resource-hud .res:hover { background: rgba(255, 255, 255, 0.06); }
+      #resource-hud .res img {
+        width: 36px; height: 36px; object-fit: contain;
+        image-rendering: -webkit-optimize-contrast;
+        filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
+      }
+      #resource-hud .res .count {
+        margin-top: 2px; font-size: 15px; font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        color: #f4e4bc; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+      }
+      #resource-hud .res[data-count="0"] { opacity: 0.45; }
+      #resource-hud .res[data-count="0"] .count { color: #aaa; }
+      #resource-hud .total {
+        align-self: center; padding: 0 10px 0 8px;
+        border-left: 1px solid rgba(255, 255, 255, 0.12);
+        margin-left: 4px;
+        font-size: 13px; color: rgba(255, 255, 255, 0.65);
+        display: flex; flex-direction: column; align-items: center; gap: 2px;
+      }
+      #resource-hud .total .num {
+        font-size: 18px; font-weight: 700; color: #f4e4bc;
+        font-variant-numeric: tabular-nums;
+      }
+
+      #bottom-bar {
+        position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+        z-index: 10; display: flex; gap: 10px; align-items: stretch;
+      }
+      #trade-toggle {
+        background: rgba(0, 0, 0, 0.6); color: #f4e4bc;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        padding: 0 18px; cursor: pointer; font: inherit;
+        font-size: 14px; font-weight: 700; letter-spacing: 0.04em;
+        text-transform: uppercase;
+        backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+        transition: background 0.12s, transform 0.12s;
+      }
+      #trade-toggle:hover { background: rgba(244, 199, 90, 0.18); transform: translateY(-1px); }
+
+      #trade-backdrop {
+        position: fixed; inset: 0; z-index: 25;
+        background: rgba(0, 0, 0, 0.55);
+        backdrop-filter: blur(2px);
+        -webkit-backdrop-filter: blur(2px);
+        display: flex; align-items: center; justify-content: center;
+      }
+      #trade-backdrop.hidden { display: none; }
+      #trade-panel {
+        min-width: 380px; max-width: 90vw;
+        background: rgba(20, 26, 38, 0.96);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 14px;
+        padding: 18px 20px 16px;
+        box-shadow: 0 14px 40px rgba(0, 0, 0, 0.55);
+        color: #eee; font-size: 13px;
+      }
+      #trade-panel h3 {
+        margin: 0 0 4px; font-size: 15px; font-weight: 700;
+        letter-spacing: 0.02em;
+      }
+      #trade-panel .sub { opacity: 0.6; font-size: 12px; margin-bottom: 14px; line-height: 1.4; }
+      #trade-panel .trade-section { margin: 10px 0; }
+      #trade-panel .section-label {
+        font-weight: 700; opacity: 0.7; text-transform: uppercase;
+        font-size: 11px; letter-spacing: 0.08em; margin-bottom: 6px;
+      }
+      #trade-panel .trade-row { display: flex; gap: 6px; }
+      .trade-btn {
+        position: relative;
+        width: 60px; height: 70px; padding: 0;
+        background: rgba(255, 255, 255, 0.04);
+        border: 2px solid rgba(255, 255, 255, 0.08);
+        border-radius: 10px; cursor: pointer; color: inherit; font: inherit;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 2px;
+        transition: background 0.12s, border-color 0.12s, transform 0.12s;
+      }
+      .trade-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.08); transform: translateY(-1px); }
+      .trade-btn:active:not(:disabled) { transform: translateY(0); }
+      .trade-btn img { width: 32px; height: 32px; pointer-events: none; }
+      .trade-btn .stock {
+        font-size: 10px; opacity: 0.55;
+        font-variant-numeric: tabular-nums;
+      }
+      .trade-btn.selected {
+        border-color: #f4c75a;
+        background: rgba(244, 199, 90, 0.15);
+        box-shadow: 0 0 0 1px rgba(244, 199, 90, 0.4);
+      }
+      .trade-btn.has-pile {
+        border-color: rgba(244, 199, 90, 0.55);
+        background: rgba(244, 199, 90, 0.08);
+      }
+      .trade-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+      .trade-btn .pile-badge {
+        position: absolute; top: -7px; right: -7px;
+        background: linear-gradient(180deg, #f4c75a, #b48a2a);
+        color: #1b2434; font-size: 11px; font-weight: 800;
+        min-width: 18px; height: 18px; padding: 0 5px;
+        border-radius: 999px;
+        display: flex; align-items: center; justify-content: center;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+        pointer-events: none;
+      }
+      .trade-btn .pile-badge.hidden { display: none; }
+      .trade-btn .rate-pill {
+        position: absolute; top: -6px; left: -6px;
+        background: rgba(255, 255, 255, 0.12);
+        color: #f4e4bc; font-size: 9px; font-weight: 800;
+        padding: 1px 5px; border-radius: 6px;
+        letter-spacing: 0.04em;
+        pointer-events: none;
+      }
+      .trade-btn .rate-pill.fav {
+        background: linear-gradient(180deg, #2e7d3e, #1a4a26);
+        color: #fff;
+      }
+      .trade-btn .rate-pill.mid {
+        background: linear-gradient(180deg, #3a5a8a, #1f365a);
+        color: #fff;
+      }
+      #trade-panel .arrow {
+        text-align: center; opacity: 0.5; margin: 6px 0; font-size: 18px;
+      }
+      #trade-panel .trade-summary {
+        margin-top: 8px; padding: 8px 10px;
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 6px;
+        font-size: 12px; opacity: 0.85;
+        font-variant-numeric: tabular-nums;
+      }
+      #trade-panel .trade-summary .rate { color: #f4c75a; font-weight: 700; }
+      #trade-reset {
+        background: rgba(255, 255, 255, 0.05); color: #ccc;
+      }
+      #trade-panel .actions {
+        display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px;
+      }
+      #trade-panel .actions button {
+        padding: 7px 14px; border-radius: 6px; font: inherit;
+        cursor: pointer; border: 1px solid rgba(255, 255, 255, 0.15);
+      }
+      #trade-cancel { background: rgba(255, 255, 255, 0.05); color: #ccc; }
+      #trade-confirm {
+        background: #f4c75a; color: #1b2434; border: none; font-weight: 700;
+      }
+      #trade-confirm:disabled {
+        background: rgba(244, 199, 90, 0.2); color: rgba(255, 255, 255, 0.4);
+        cursor: not-allowed;
+      }
+
+      #passives-panel {
+        position: fixed; top: 8px; right: 8px; z-index: 10;
+        display: flex; flex-direction: column; gap: 4px;
+        align-items: flex-end;
+      }
+      #passives-panel.hidden { display: none; }
+      #passives-panel .header {
+        font-size: 10px; letter-spacing: 0.1em;
+        text-transform: uppercase; opacity: 0.55;
+        padding: 0 8px;
+      }
+      #passives-panel .badge {
+        background: rgba(0, 0, 0, 0.6);
+        border: 1px solid rgba(244, 199, 90, 0.45);
+        border-radius: 999px;
+        padding: 4px 10px 4px 6px;
+        font-size: 12px;
+        display: flex; align-items: center; gap: 6px;
+        color: #f4e4bc;
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
+      }
+      #passives-panel .badge img { width: 18px; height: 18px; }
+      #passives-panel .badge.generic { border-color: rgba(160, 200, 255, 0.5); color: #d2e5ff; }
+      #passives-panel .badge .ratio { font-weight: 800; font-variant-numeric: tabular-nums; }
+
+      #resource-hud .res.bump {
+        animation: res-bump 0.45s cubic-bezier(.34, 1.56, .64, 1);
+      }
+      @keyframes res-bump {
+        0%   { transform: scale(1); }
+        45%  { transform: scale(1.32); }
+        100% { transform: scale(1); }
+      }
+
+      #resource-fx {
+        position: fixed; inset: 0;
+        pointer-events: none; z-index: 20;
+        overflow: hidden;
+      }
+      .fx-icon {
+        position: absolute;
+        width: 56px; height: 56px;
+        pointer-events: none;
+        will-change: transform, opacity;
+        filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.55));
+        transform: translate(-50%, -50%) scale(0);
+        opacity: 0;
+      }
     </style>
   </head>
   <body>
@@ -22,11 +268,279 @@
       <canvas id="board"></canvas>
     </div>
     <div id="hud">
-      <label>seed <input id="seed" type="number" value="1337" /></label>
-      <label>radius <input id="radius" type="number" min="1" max="6" value="0" placeholder="auto" /></label>
-      <label>img scale <input id="imgScale" type="number" step="0.01" value="1.08" /></label>
-      <button id="regen">regen</button>
+      <div style="display:flex; gap:6px;">
+        <button id="hud-toggle" aria-expanded="true" aria-controls="hud-panel">controls ▾</button>
+        <button id="restart-toggle" type="button">restart game</button>
+        <button id="roll-toggle" type="button">🎲 roll</button>
+      </div>
+      <div id="hud-panel">
+        <details>
+          <summary>Game Rules</summary>
+          <div class="group">
+            <label><span class="lbl">mixed bank pile</span><input id="ruleMixedTrade" type="checkbox" /></label>
+            <label><span class="lbl">all visible</span><input id="ruleAllVisible" type="checkbox" /></label>
+            <label><span class="lbl">fog of war</span><input id="ruleFogOfWar" type="checkbox" /></label>
+            <label><span class="lbl">guaranteed 6/8</span><input id="ruleGuaranteed68" type="checkbox" /></label>
+          </div>
+        </details>
+        <details>
+          <summary>Resource fog</summary>
+          <div class="group">
+            <label><span class="lbl">enabled</span><input id="fogEnabled" type="checkbox" checked /></label>
+            <label><span class="lbl">color</span><input id="fogColor" type="color" value="#3d3d3d" /></label>
+            <label><span class="lbl">opacity</span><input id="fogOpacity" type="number" step="0.05" min="0" max="1" value="0.4" /></label>
+          </div>
+        </details>
+        <details open>
+          <summary>Map</summary>
+          <div class="group">
+            <label><span class="lbl">seed</span><input id="seed" type="number" value="1337" /><button id="regen" type="button" title="randomize seed" aria-label="randomize seed">🎲</button></label>
+            <label><span class="lbl">style</span><select id="mapStyle">
+              <option value="standard">standard</option>
+              <option value="continent">continent</option>
+              <option value="continent-lakes">continent-lakes</option>
+            </select></label>
+            <label><span class="lbl">radius</span><input id="radius" type="number" min="1" max="6" value="2" placeholder="auto" /></label>
+          </div>
+        </details>
+        <details>
+          <summary>Tiles</summary>
+          <div class="group">
+            <label><span class="lbl">img scale</span><input id="imgScale" type="number" step="0.001" value="1.074" /></label>
+          </div>
+        </details>
+        <details>
+          <summary>Numbers</summary>
+          <div class="group">
+            <label><span class="lbl">scale</span><input id="numScale" type="number" step="0.01" value="0.24" /></label>
+            <label><span class="lbl">offset x</span><input id="numOffX" type="number" step="0.01" value="0.2" /></label>
+            <label><span class="lbl">offset y</span><input id="numOffY" type="number" step="0.01" value="0.35" /></label>
+          </div>
+        </details>
+        <details>
+          <summary>Ports</summary>
+          <div class="group">
+            <label><span class="lbl">glow color</span><input id="portGlowColor" type="color" value="#415c71" /></label>
+            <label><span class="lbl">glow size</span><input id="portGlowSize" type="number" step="0.05" value="3" /></label>
+            <label><span class="lbl">glow feather</span><input id="portGlowFeather" type="number" step="0.05" min="0" max="1" value="0.6" /></label>
+            <label><span class="lbl">glow opacity</span><input id="portGlowOpacity" type="number" step="0.05" min="0" max="1" value="1" /></label>
+            <label><span class="lbl">glow blend</span><select id="portGlowBlend">
+              <option value="overlay">overlay</option>
+              <option value="source-over">source-over</option>
+              <option value="multiply">multiply</option>
+              <option value="soft-light">soft-light</option>
+              <option value="darken">darken</option>
+              <option value="screen">screen</option>
+            </select></label>
+            <label><span class="lbl">center offset</span><input id="portCenterOffset" type="number" step="0.01" value="0.32" /></label>
+            <label><span class="lbl">items gap</span><input id="portItemsGap" type="number" step="0.05" value="1.35" /></label>
+            <label><span class="lbl">icon size</span><input id="portIconSize" type="number" step="0.05" value="1.85" /></label>
+            <label><span class="lbl">text size</span><input id="portTextSize" type="number" step="0.05" value="0.6" /></label>
+          </div>
+        </details>
+        <details>
+          <summary>Beach</summary>
+          <div class="group">
+            <label><span class="lbl">foam color</span><input id="foamColor" type="color" value="#c5cdd8" /></label>
+            <label><span class="lbl">lake foam</span><input id="lakeFoamColor" type="color" value="#498097" /></label>
+          </div>
+        </details>
+        <details>
+          <summary>Ocean glow</summary>
+          <div class="group">
+            <label><span class="lbl">spread</span><input id="glowSpread" type="number" step="0.01" value="0.6" /></label>
+            <label><span class="lbl">feather</span><input id="glowFeather" type="number" step="0.01" value="0.3" /></label>
+            <label><span class="lbl">inner spread</span><input id="innerGlowSpread" type="number" step="0.01" value="0.22" /></label>
+            <label><span class="lbl">inner feather</span><input id="innerGlowFeather" type="number" step="0.01" value="0.1" /></label>
+          </div>
+        </details>
+        <details>
+          <summary>Vignette</summary>
+          <div class="group">
+            <label><span class="lbl">enabled</span><input id="vignetteEnabled" type="checkbox" checked /></label>
+            <label><span class="lbl">color</span><input id="vignetteColor" type="color" value="#0f142e" /></label>
+            <label><span class="lbl">intensity</span><input id="vignetteIntensity" type="number" step="0.05" min="0" max="1" value="0.7" /></label>
+            <label><span class="lbl">feather</span><input id="vignetteFeather" type="number" step="0.05" min="0" max="1" value="0.6" /></label>
+            <label><span class="lbl">scale</span><input id="vignetteScale" type="number" step="0.05" min="0.1" value="2.15" /></label>
+          </div>
+        </details>
+        <details>
+          <summary>Clouds</summary>
+          <div class="group">
+            <label><span class="lbl">enabled</span><input id="cloudsEnabled" type="checkbox" /></label>
+            <label><span class="lbl">color</span><input id="cloudColor" type="color" value="#a9d1f4" /></label>
+            <label><span class="lbl">opacity</span><input id="cloudOpacity" type="number" step="0.05" min="0" max="1" value="0.25" /></label>
+            <label><span class="lbl">density</span><input id="cloudDensity" type="number" step="0.05" min="0" max="1" value="0.25" /></label>
+            <label><span class="lbl">scale</span><input id="cloudScale" type="number" step="50" min="100" value="1650" /></label>
+            <label><span class="lbl">wind speed</span><input id="cloudWindSpeed" type="number" step="1" value="30" /></label>
+            <label><span class="lbl">wind drift</span><input id="cloudWindDrift" type="number" step="0.01" value="0.1" /></label>
+            <label><span class="lbl">morph speed</span><input id="cloudMorphSpeed" type="number" step="0.05" value="0.2" /></label>
+            <label><span class="lbl">blend</span><select id="cloudBlend">
+              <option value="overlay">overlay</option>
+              <option value="source-over">source-over</option>
+              <option value="multiply">multiply</option>
+              <option value="soft-light">soft-light</option>
+              <option value="darken">darken</option>
+            </select></label>
+          </div>
+        </details>
+        <details>
+          <summary>Buildings</summary>
+          <div class="group">
+            <label><span class="lbl">hue</span><input id="buildingHue" type="range" min="0" max="359" step="1" value="0" /></label>
+            <label><span class="lbl">saturation</span><input id="buildingSat" type="range" min="0" max="100" step="1" value="70" /></label>
+            <label><span class="lbl">lightness</span><input id="buildingLight" type="range" min="0" max="100" step="1" value="50" /></label>
+            <label><span class="lbl">tint blend</span><select id="buildingBlend">
+              <option value="overlay">overlay</option>
+              <option value="multiply">multiply</option>
+              <option value="source-over">source-over</option>
+              <option value="soft-light">soft-light</option>
+              <option value="hard-light">hard-light</option>
+              <option value="color">color</option>
+              <option value="hue">hue</option>
+              <option value="saturation">saturation</option>
+              <option value="luminosity">luminosity</option>
+              <option value="screen">screen</option>
+              <option value="lighten">lighten</option>
+              <option value="darken">darken</option>
+            </select></label>
+            <details>
+              <summary>Thieves</summary>
+              <div class="group">
+                <label><span class="lbl">scale</span><input id="thievesScale" type="number" step="0.05" min="0.1" value="0.7" /></label>
+                <label><span class="lbl">offset y</span><input id="thievesOffY" type="number" step="0.01" value="-0.12" /></label>
+              </div>
+            </details>
+            <details>
+              <summary>Settlement</summary>
+              <div class="group">
+                <label><span class="lbl">scale</span><input id="settlementScale" type="number" step="0.05" min="0.1" value="0.7" /></label>
+                <label><span class="lbl">offset y</span><input id="settlementOffY" type="number" step="0.01" value="-0.05" /></label>
+              </div>
+            </details>
+            <details>
+              <summary>City</summary>
+              <div class="group">
+                <label><span class="lbl">scale</span><input id="cityScale" type="number" step="0.05" min="0.1" value="0.85" /></label>
+                <label><span class="lbl">offset y</span><input id="cityOffY" type="number" step="0.01" value="-0.15" /></label>
+              </div>
+            </details>
+            <details>
+              <summary>Shadow</summary>
+              <div class="group">
+                <label><span class="lbl">blend</span><select id="shadowBlend">
+                  <option value="multiply" selected>multiply</option>
+                  <option value="source-over">source-over</option>
+                  <option value="overlay">overlay</option>
+                  <option value="soft-light">soft-light</option>
+                  <option value="hard-light">hard-light</option>
+                  <option value="darken">darken</option>
+                </select></label>
+                <label><span class="lbl">angle°</span><input id="shadowAngle" type="number" step="1" value="164" /></label>
+                <label><span class="lbl">spread</span><input id="shadowSpread" type="number" step="0.005" min="0" value="0.06" /></label>
+                <label><span class="lbl">feather</span><input id="shadowFeather" type="number" step="0.005" min="0" value="0.025" /></label>
+                <label><span class="lbl">opacity</span><input id="shadowOpacity" type="number" step="0.05" min="0" max="1" value="0.4" /></label>
+              </div>
+            </details>
+            <details>
+              <summary>Bridge</summary>
+              <div class="group">
+                <label><span class="lbl">path width</span><input id="pathWidth" type="number" step="0.01" min="0" value="0.1" /></label>
+                <label><span class="lbl">path blend</span><select id="pathBlend">
+                  <option value="darken">darken</option>
+                  <option value="source-over">source-over</option>
+                  <option value="multiply">multiply</option>
+                  <option value="overlay">overlay</option>
+                  <option value="soft-light">soft-light</option>
+                  <option value="hard-light">hard-light</option>
+                  <option value="screen">screen</option>
+                  <option value="lighten">lighten</option>
+                </select></label>
+                <details>
+                  <summary>30° (auto-mirror)</summary>
+                  <div class="group">
+                    <label><span class="lbl">scale</span><input id="bridge30Scale" type="number" step="0.05" min="0.1" value="0.5" /></label>
+                    <label><span class="lbl">offset x</span><input id="bridge30OffX" type="number" step="0.01" value="0.03" /></label>
+                    <label><span class="lbl">offset y</span><input id="bridge30OffY" type="number" step="0.01" value="-0.05" /></label>
+                    <label><span class="lbl">rotation</span><input id="bridge30Rot" type="number" step="1" value="-1" /></label>
+                  </div>
+                </details>
+                <details>
+                  <summary>Straight</summary>
+                  <div class="group">
+                    <label><span class="lbl">scale</span><input id="bridgeStraightScale" type="number" step="0.05" min="0.1" value="0.5" /></label>
+                    <label><span class="lbl">offset x</span><input id="bridgeStraightOffX" type="number" step="0.01" value="0" /></label>
+                    <label><span class="lbl">offset y</span><input id="bridgeStraightOffY" type="number" step="0.01" value="-0.06" /></label>
+                    <label><span class="lbl">rotation</span><input id="bridgeStraightRot" type="number" step="1" value="0" /></label>
+                  </div>
+                </details>
+              </div>
+            </details>
+          </div>
+        </details>
+        <details>
+          <summary>Hover icon</summary>
+          <div class="group">
+            <label><span class="lbl">enabled</span><input id="hoverEnabled" type="checkbox" checked /></label>
+            <label><span class="lbl">color</span><input id="hoverColor" type="color" value="#ffffff" /></label>
+            <label><span class="lbl">offset x</span><input id="hoverOffX" type="number" step="0.05" value="-0.2" /></label>
+            <label><span class="lbl">offset y</span><input id="hoverOffY" type="number" step="0.05" value="-0.4" /></label>
+            <label><span class="lbl">scale</span><input id="hoverScale" type="number" step="0.05" value="0.6" /></label>
+            <label><span class="lbl">opacity</span><input id="hoverOpacity" type="number" step="0.05" min="0" max="1" value="0.9" /></label>
+            <label><span class="lbl">fade in</span><input id="hoverFadeIn" type="number" step="0.05" min="0" value="0.1" /></label>
+            <label><span class="lbl">fade out</span><input id="hoverFadeOut" type="number" step="0.05" min="0" value="0.1" /></label>
+            <label><span class="lbl">glow size</span><input id="hoverGlowSize" type="number" step="0.05" value="0.75" /></label>
+            <label><span class="lbl">feather</span><input id="hoverFeather" type="number" step="0.05" min="0" max="1" value="0.7" /></label>
+            <label><span class="lbl">blend</span><select id="hoverBlend">
+              <option value="overlay">overlay</option>
+              <option value="source-over">source-over</option>
+              <option value="screen">screen</option>
+              <option value="lighter">lighter</option>
+              <option value="soft-light">soft-light</option>
+              <option value="multiply">multiply</option>
+            </select></label>
+          </div>
+        </details>
+      </div>
     </div>
+    <div id="bottom-bar">
+      <div id="resource-hud" aria-label="resources"></div>
+      <button id="trade-toggle" type="button" aria-label="bank trade">Trade</button>
+    </div>
+    <div id="resource-fx" aria-hidden="true"></div>
+    <div id="passives-panel" class="hidden" aria-label="trade passives"></div>
+    <div id="trade-backdrop" class="hidden" role="dialog" aria-modal="true" aria-label="bank trade">
+      <div id="trade-panel">
+        <h3>Bank Trade</h3>
+        <div class="sub">Pick cards to give, then a resource to receive. Better rates apply when you own ports.</div>
+        <div class="trade-section">
+          <div class="section-label">Give</div>
+          <div class="trade-row" id="trade-give"></div>
+          <div class="trade-summary" id="trade-summary">Pick what to give.</div>
+        </div>
+        <div class="arrow">↓</div>
+        <div class="trade-section">
+          <div class="section-label">Get</div>
+          <div class="trade-row" id="trade-get"></div>
+        </div>
+        <div class="actions">
+          <button id="trade-reset" type="button">Reset</button>
+          <button id="trade-cancel" type="button">Cancel</button>
+          <button id="trade-confirm" type="button" disabled>Trade</button>
+        </div>
+      </div>
+    </div>
+    <script>
+      (() => {
+        const t = document.getElementById("hud-toggle");
+        const p = document.getElementById("hud-panel");
+        t.addEventListener("click", () => {
+          const hidden = p.classList.toggle("hidden");
+          t.setAttribute("aria-expanded", String(!hidden));
+          t.textContent = hidden ? "controls ▸" : "controls ▾";
+        });
+      })();
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
