@@ -3,8 +3,6 @@ import { axialToPixel, HexLayout } from "../hex";
 import { hexCorner } from "../render/primitives";
 import { buildings, vertexKey } from "./buildings";
 import { ResourceKind, RESOURCE_TO_PORT_TYPE } from "./resources";
-import { getPlacementStep } from "./placement";
-import { getRevealMode } from "../animation/reveal";
 
 // Bank trade rule set. Vanilla Catan only allows N-of-the-same-resource
 // trades. The "mixed" variant — any N cards regardless of type — is a
@@ -21,9 +19,11 @@ export function setBankTradeRule(v: BankTradeRule) {
   BANK_TRADE_RULE = v;
 }
 
-// Custom rule: each opening settlement must sit on a vertex with exactly one
-// neighbouring 6 or 8 tile. Only meaningful in fog-of-war mode (in default /
-// all-visible the player already sees every chance number).
+// Custom rule: across both opening settlements, the player ends up with
+// exactly one 6/8-adjacent vertex. Placement itself is unconstrained — once
+// the opening (S1, B1, S2, B2) is complete, the board's chance numbers are
+// reshuffled in-place so exactly one settlement has a single 6/8 neighbour
+// and the other has none.
 let ruleGuaranteed68: boolean = false;
 
 export function getRuleGuaranteed68(): boolean {
@@ -34,62 +34,112 @@ export function setRuleGuaranteed68(v: boolean) {
   ruleGuaranteed68 = v;
 }
 
-export function countNeighbor68(vk: string, board: Board, layout: HexLayout): number {
+// Tile indices that share the given vertex as a corner.
+function tilesAroundVertex(vk: string, board: Board, layout: HexLayout): Set<number> {
   const s = layout.size;
-  let count = 0;
+  const out = new Set<number>();
   for (let i = 0; i < board.tiles.length; i++) {
-    const n = board.tiles[i].number;
-    if (n !== 6 && n !== 8) continue;
     const { x, y } = axialToPixel(board.tiles[i], layout);
     for (let c = 0; c < 6; c++) {
       const [cx, cy] = hexCorner(x, y, s, c);
-      if (vertexKey(cx, cy) === vk) { count++; break; }
+      if (vertexKey(cx, cy) === vk) { out.add(i); break; }
     }
-  }
-  return count;
-}
-
-export function filterByNeighbor68(
-  vertices: Set<string>,
-  board: Board,
-  layout: HexLayout,
-  required: 0 | 1,
-): Set<string> {
-  const out = new Set<string>();
-  for (const vk of vertices) {
-    if (countNeighbor68(vk, board, layout) === required) out.add(vk);
   }
   return out;
 }
 
-// Total 6/8 neighbours already claimed by existing settlements/cities. We
-// allow at most ONE across the whole opening, so S2 must have zero left.
-export function existingBuildings68Count(board: Board, layout: HexLayout): number {
-  let total = 0;
-  for (const vk of buildings.keys()) {
-    total += countNeighbor68(vk, board, layout);
+function shuffleInPlace<T>(arr: T[]): T[] {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
   }
-  return total;
+  return arr;
 }
 
-export function applyGuaranteed68IfActive(
-  validV: Set<string>,
-  board: Board,
-  layout: HexLayout,
-): Set<string> {
-  if (!ruleGuaranteed68) return validV;
-  if (getRevealMode() !== "fog") return validV;
-  const step = getPlacementStep();
-  if (step !== "initial-s1" && step !== "initial-s2") return validV;
-  // S1: exactly one 6/8 neighbour. S2: zero, but only if S1 actually claimed
-  // a 6/8 (the fallback case where the board had no candidate for S1 means
-  // S2 still aims for one to satisfy the rule's guarantee).
-  const alreadyClaimed = existingBuildings68Count(board, layout);
-  const required: 0 | 1 = alreadyClaimed >= 1 ? 0 : 1;
-  const filtered = filterByNeighbor68(validV, board, layout, required);
-  // Fall back to the unfiltered set if the board has no candidates — the
-  // rule shouldn't lock the player out entirely on a hostile layout.
-  return filtered.size > 0 ? filtered : validV;
+// Reshuffle the board's number tokens so that exactly one of the two opening
+// settlements has a single 6/8 neighbour and the other has none. Preserves the
+// existing number-pool composition (same multiset of numbers, deserts stay
+// numberless). No-op if the rule is off, fewer than two settlements exist, the
+// pool has no 6/8s, or no exclusive non-desert neighbour is available.
+export function reshuffleFor68Rule(board: Board, layout: HexLayout) {
+  if (!ruleGuaranteed68) return;
+  const settlementVKs = [...buildings.entries()]
+    .filter(([, k]) => k === "settlement")
+    .map(([v]) => v);
+  if (settlementVKs.length !== 2) return;
+
+  const tA = tilesAroundVertex(settlementVKs[0], board, layout);
+  const tB = tilesAroundVertex(settlementVKs[1], board, layout);
+
+  // Numbered tile indices only — deserts have no number and stay out of the pool.
+  const numbered = (set: Set<number>) =>
+    new Set([...set].filter((i) => board.tiles[i].number != null));
+  const ntA = numbered(tA);
+  const ntB = numbered(tB);
+  const exclA = new Set([...ntA].filter((i) => !ntB.has(i)));
+  const exclB = new Set([...ntB].filter((i) => !ntA.has(i)));
+  const shared = new Set([...ntA].filter((i) => ntB.has(i)));
+
+  // Pool composition.
+  const numberedIdx: number[] = [];
+  for (let i = 0; i < board.tiles.length; i++) {
+    if (board.tiles[i].number != null) numberedIdx.push(i);
+  }
+  const allNums = numberedIdx.map((i) => board.tiles[i].number!);
+  const sixEight = allNums.filter((n) => n === 6 || n === 8);
+  const rest = allNums.filter((n) => n !== 6 && n !== 8);
+  if (sixEight.length === 0) return;
+
+  // Pick the "winner" settlement (the one that gets the single 6/8). Prefer
+  // whichever has more exclusive non-desert neighbours so we always have at
+  // least one slot to land the 6/8 on; if both qualify, pick A.
+  let winnerExcl: Set<number>;
+  let loserExcl: Set<number>;
+  if (exclA.size >= 1 && exclA.size >= exclB.size) {
+    winnerExcl = exclA;
+    loserExcl = exclB;
+  } else if (exclB.size >= 1) {
+    winnerExcl = exclB;
+    loserExcl = exclA;
+  } else {
+    return; // No exclusive numbered neighbour anywhere — can't satisfy rule.
+  }
+
+  // Tiles that touch neither settlement — safe overflow targets for any
+  // remaining 6/8s in the pool.
+  const otherTiles = numberedIdx.filter((i) => !ntA.has(i) && !ntB.has(i));
+
+  const assignment = new Map<number, number>();
+  const sixPool = shuffleInPlace([...sixEight]);
+  const restPool = shuffleInPlace([...rest]);
+  const take = (pool: number[]) => pool.pop()!;
+
+  // 1. One 6/8 on a random winner-exclusive tile.
+  const winnerSlots = shuffleInPlace([...winnerExcl]);
+  assignment.set(winnerSlots[0], take(sixPool));
+
+  // 2. Remaining 6/8s go to "other" tiles first; only if those run out do we
+  //    spill into shared / loser-exclusive (rule-violating fallback, but
+  //    preserves the pool on hostile boards).
+  const overflow = [
+    ...shuffleInPlace(otherTiles.filter((i) => !assignment.has(i))),
+    ...shuffleInPlace([...shared].filter((i) => !assignment.has(i))),
+    ...shuffleInPlace([...loserExcl].filter((i) => !assignment.has(i))),
+  ];
+  for (const i of overflow) {
+    if (sixPool.length === 0) break;
+    assignment.set(i, take(sixPool));
+  }
+
+  // 3. Fill every remaining numbered slot with the non-6/8 pool.
+  const remaining = shuffleInPlace(numberedIdx.filter((i) => !assignment.has(i)));
+  for (const i of remaining) {
+    assignment.set(i, take(restPool));
+  }
+
+  for (const i of numberedIdx) {
+    board.tiles[i].number = assignment.get(i)!;
+  }
 }
 
 export function tradeRateFor(resource: ResourceKind, ports: Set<PortType>): 2 | 3 | 4 {

@@ -63,7 +63,7 @@ import {
   getBankTradeRule,
   setBankTradeRule,
   setRuleGuaranteed68,
-  applyGuaranteed68IfActive,
+  reshuffleFor68Rule,
   tradeRateFor,
   ownedPortTypes,
 } from "./game/trade-rules";
@@ -290,7 +290,7 @@ async function main() {
         : null,
     };
     const placementGraph = buildPlacementGraph(board, layout);
-    const validV = applyGuaranteed68IfActive(validSettlementVertices(placementGraph), board, layout);
+    const validV = validSettlementVertices(placementGraph);
     const validC = validCityVertices();
     const validE = validBridgeEdges(placementGraph);
     const mouseWX = mouseX < 0 ? -1e9 : (mouseX - view.tx) / view.zoom;
@@ -543,7 +543,7 @@ async function main() {
     const wy = (my - view.ty) / view.zoom;
     const layout = fitLayout(board, canvas.clientWidth, canvas.clientHeight);
     const graph = buildPlacementGraph(board, layout);
-    const validV = applyGuaranteed68IfActive(validSettlementVertices(graph), board, layout);
+    const validV = validSettlementVertices(graph);
     const validC = validCityVertices();
     const validE = validBridgeEdges(graph);
     const snap = snapPlacementHover(graph, validV, validC, validE, wx, wy, layout.size);
@@ -580,10 +580,14 @@ async function main() {
       } else if (getPlacementStep() === "initial-b2") {
         setPlacementStep("free");
         setLastInitialSettlementKey(null);
-        // Opening complete — in default mode flip every tile face-up via the
-        // staggered global animation. In fog mode flip the tiles the player
-        // has already explored (settlements + bridge endpoints) and leave the
-        // rest face-down. All-visible has nothing to do.
+        // Opening complete — reshuffle chance numbers to honour the
+        // guaranteed-6/8 rule (no-op if the rule is off). Done before the
+        // reveal kicks in so the staggered flip shows the new numbers.
+        reshuffleFor68Rule(board, fitLayout(board, canvas.clientWidth, canvas.clientHeight));
+        // In default mode flip every tile face-up via the staggered global
+        // animation. In fog mode flip the tiles the player has already
+        // explored (settlements + bridge endpoints) and leave the rest
+        // face-down. All-visible has nothing to do.
         if (getRevealMode() === "default") {
           rebuildRevealOrders(board);
           reveal.animStart = performance.now();
