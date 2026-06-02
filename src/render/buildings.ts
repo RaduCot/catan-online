@@ -110,11 +110,17 @@ export function drawPlacements(
     thievesOffY: number;
     thievesPos: { x: number; y: number } | null;
     now: number;
+    // Fog-of-war: when defined, only render pieces whose key is in the set.
+    // Undefined → render every piece (default for non-fog modes).
+    visibleBuildingKeys?: Set<string>;
+    visibleBridgeKeys?: Set<string>;
   },
 ) {
   if (!buildings.size && !bridges.size && !opts.thievesPos) return;
   if (opts.buildingScale <= 0) return;
   const s = layout.size;
+  const vB = opts.visibleBuildingKeys;
+  const vR = opts.visibleBridgeKeys;
 
   // Player-colored road strokes laid down underneath the bridge sprites.
   // A bridge endpoint is "open" when it neither holds a friendly building
@@ -135,11 +141,13 @@ export function drawPlacements(
       if (!m) { m = new Map(); incident.set(k, m); }
       m.set(owner, (m.get(owner) ?? 0) + 1);
     };
-    for (const rec of bridges.values()) {
+    for (const [ek, rec] of bridges) {
+      if (vR && !vR.has(ek)) continue;
       bump(vertexKey(rec.a[0], rec.a[1]), rec.ownerId);
       bump(vertexKey(rec.b[0], rec.b[1]), rec.ownerId);
     }
-    for (const rec of bridges.values()) {
+    for (const [ek, rec] of bridges) {
+      if (vR && !vR.has(ek)) continue;
       const ka = vertexKey(rec.a[0], rec.a[1]);
       const kb = vertexKey(rec.b[0], rec.b[1]);
       const aBld = buildings.get(ka);
@@ -172,6 +180,7 @@ export function drawPlacements(
 
   if (buildings.size) {
     for (const [v, rec] of buildings) {
+      if (vB && !vB.has(v)) continue;
       const [xPart, yPart] = v.split("|").map(Number);
       const wx = xPart / 4, wy = yPart / 4;
       const color = opts.getOwnerColor(rec.ownerId);
@@ -195,6 +204,7 @@ export function drawPlacements(
 
   if (bridges.size) {
     for (const [k, rec] of bridges) {
+      if (vR && !vR.has(k)) continue;
       const color = opts.getOwnerColor(rec.ownerId);
       const sprite: HTMLCanvasElement | null = rec.variant === "30up"
         ? tintedBuilding("bridge30up", imgs.bridge30up, imgs.bridge30upMask, color, opts.blend)

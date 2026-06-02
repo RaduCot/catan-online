@@ -239,3 +239,53 @@ export function exploredTileIndices(playerId: number, board: Board, layout: HexL
   }
   return out;
 }
+
+// Map of vertex-key → set of tile indices that share that vertex as a corner.
+// Used to test "is this vertex touching an explored tile?" without rescanning
+// every tile per query.
+export function buildVertexAdjacency(board: Board, layout: HexLayout): Map<string, Set<number>> {
+  const out = new Map<string, Set<number>>();
+  const s = layout.size;
+  for (let i = 0; i < board.tiles.length; i++) {
+    const { x, y } = axialToPixel(board.tiles[i], layout);
+    for (let c = 0; c < 6; c++) {
+      const [cx, cy] = hexCorner(x, y, s, c);
+      const k = vertexKey(cx, cy);
+      let set = out.get(k);
+      if (!set) { set = new Set(); out.set(k, set); }
+      set.add(i);
+    }
+  }
+  return out;
+}
+
+// Pieces (buildings + bridges) the viewer can see under fog-of-war: their own
+// pieces, plus opponents' pieces sitting on tiles the viewer has explored.
+// A bridge counts as visible if *either* of its endpoint vertices touches an
+// explored tile — half-seen roads are still roads.
+export function visiblePiecesForViewer(
+  viewerId: number,
+  board: Board,
+  layout: HexLayout,
+): { buildings: Set<string>; bridges: Set<string> } {
+  const exploredTiles = exploredTileIndices(viewerId, board, layout);
+  const adj = buildVertexAdjacency(board, layout);
+  const vertexExposed = (vk: string): boolean => {
+    const tiles = adj.get(vk);
+    if (!tiles) return false;
+    for (const t of tiles) if (exploredTiles.has(t)) return true;
+    return false;
+  };
+  const visBuildings = new Set<string>();
+  for (const [vk, rec] of buildings) {
+    if (rec.ownerId === viewerId || vertexExposed(vk)) visBuildings.add(vk);
+  }
+  const visBridges = new Set<string>();
+  for (const [ek, rec] of bridges) {
+    if (rec.ownerId === viewerId) { visBridges.add(ek); continue; }
+    const aK = vertexKey(rec.a[0], rec.a[1]);
+    const bK = vertexKey(rec.b[0], rec.b[1]);
+    if (vertexExposed(aK) || vertexExposed(bK)) visBridges.add(ek);
+  }
+  return { buildings: visBuildings, bridges: visBridges };
+}

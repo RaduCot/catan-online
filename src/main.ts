@@ -43,6 +43,7 @@ import {
   validCityVertices,
   snapPlacementHover,
   exploredTileIndices,
+  visiblePiecesForViewer,
 } from "./game/placement";
 import {
   ResourceKind,
@@ -368,6 +369,14 @@ async function main() {
         && tileRevealProgress(thievesTileIdx, performance.now(), board.tiles.length) >= 1)
         ? axialToPixel(board.tiles[thievesTileIdx], layout)
         : null,
+      // Fog mode hides opponents' pieces until the viewer has explored a tile
+      // they touch. Other modes render every piece.
+      ...(getRevealMode() === "fog"
+        ? (() => {
+            const vis = visiblePiecesForViewer(getViewerPlayerId(), board, layout);
+            return { visibleBuildingKeys: vis.buildings, visibleBridgeKeys: vis.bridges };
+          })()
+        : {}),
     };
     const placementGraph = buildPlacementGraph(board, layout);
     // Hide hints when viewer != current builder (they shouldn't see where

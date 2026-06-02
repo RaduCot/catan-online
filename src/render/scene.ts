@@ -61,6 +61,8 @@ export function draw(
     thievesScale: number;
     thievesOffY: number;
     thievesPos: { x: number; y: number } | null;
+    visibleBuildingKeys?: Set<string>;
+    visibleBridgeKeys?: Set<string>;
   },
   hoverOpts: HoverOpts,
   vignetteOpts: VignetteOpts,
