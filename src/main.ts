@@ -701,7 +701,6 @@ async function main() {
         }
       }
       placementBounce.set(snap.key, performance.now());
-      if (phase === "opening") openingAdvance();
     } else {
       const e2 = graph.edges.get(snap.key);
       if (!e2) return;
@@ -710,10 +709,9 @@ async function main() {
       if (getPlacementStep() === "initial-b1") {
         setPlacementStep("initial-s2");
         setLastInitialSettlementKey(null);
-        if (phase === "opening") openingAdvance();
       } else if (getPlacementStep() === "initial-b2") {
-        // End of this player's opening pair. If snake-order has more slots,
-        // the next placer is the next snake entry; otherwise opening is done.
+        // End of this player's full opening (S1+B1+S2+B2). Advance to the
+        // next player's slot; if opening is done, transition to roll phase.
         if (phase === "opening") openingAdvance();
         const stillOpening = getPhase() === "opening";
         if (stillOpening) {
@@ -1222,6 +1220,19 @@ async function main() {
     }
   }
   function openPreMatchModal() {
+    // 1-player mode skips pre-match — no point rolling against yourself.
+    if (getPlayers().length <= 1) {
+      setTurnOrder([0]);
+      setPhase("opening");
+      setViewerPlayerId(0);
+      viewerSelect.value = "0";
+      renderResourceHud(0);
+      refreshPlayerStrip();
+      refreshTopButtons();
+      refreshPassivesAndTrade();
+      render();
+      return;
+    }
     startPreMatch(getPlayers().length);
     prematchBackdrop.classList.remove("hidden");
     renderPreMatchRows();

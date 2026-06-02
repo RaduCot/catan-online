@@ -8,34 +8,26 @@ export type Phase = "pre-match" | "opening" | "roll" | "main";
 
 let phase: Phase = "pre-match";
 let turnOrder: number[] = [];
-// Snake-order opening: slot 0..N-1 forward, N..2N-1 reverse.
+// Sequential opening: each player places their full S1+B1+S2+B2 before the
+// next player starts. Slot indexes turnOrder; advances once per player.
 let openingSlot: number = 0;
-let openingSubStep: "settlement" | "bridge" = "settlement";
 
 export function getPhase(): Phase { return phase; }
 export function setPhase(p: Phase) { phase = p; }
 export function getTurnOrder(): number[] { return turnOrder; }
 export function setTurnOrder(order: number[]) { turnOrder = order.slice(); }
 export function getOpeningSlot(): number { return openingSlot; }
-export function getOpeningSubStep(): "settlement" | "bridge" { return openingSubStep; }
 
 export function openingActivePlayerId(): number {
-  const N = turnOrder.length;
-  if (N === 0) return 0;
-  if (openingSlot < N) return turnOrder[openingSlot];
-  return turnOrder[2 * N - 1 - openingSlot];
+  if (turnOrder.length === 0) return 0;
+  return turnOrder[openingSlot] ?? turnOrder[0];
 }
 
+// Call once when a player completes their full opening (S1+B1+S2+B2).
+// Advances the slot; transitions phase → "roll" when every player has opened.
 export function openingAdvance() {
-  const N = turnOrder.length;
-  if (openingSubStep === "settlement") {
-    openingSubStep = "bridge";
-    return;
-  }
-  // bridge → next slot's settlement
-  openingSubStep = "settlement";
   openingSlot++;
-  if (openingSlot >= 2 * N) {
+  if (openingSlot >= turnOrder.length) {
     phase = "roll";
     setActivePlayerId(turnOrder[0]);
   }
@@ -58,7 +50,6 @@ export function resetTurnState() {
   phase = "pre-match";
   turnOrder = [];
   openingSlot = 0;
-  openingSubStep = "settlement";
 }
 
 // Whoever is the current "builder" for placement purposes — opening's snake

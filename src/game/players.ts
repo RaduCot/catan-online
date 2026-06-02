@@ -23,7 +23,7 @@ let activePlayerId: number = 0;
 let viewerPlayerId: number = 0;
 
 export function initPlayers(count: number, colors?: string[], names?: string[]) {
-  const n = Math.max(2, Math.min(MAX_PLAYERS, count));
+  const n = Math.max(1, Math.min(MAX_PLAYERS, count));
   players = [];
   for (let i = 0; i < n; i++) {
     players.push({
