@@ -11,6 +11,7 @@ import {
 import { buildings, vertexKey } from "./buildings";
 import { dice, DICE_ROLL_DURATION, DICE_SETTLE_DURATION } from "../animation/dice";
 import { tileSheen } from "../animation/tile-sheen";
+import { getViewerPlayerId, getActivePlayerId, getPlayers, MAX_PLAYERS } from "./players";
 
 // Resources kept as a flat record keyed by canonical resource name. The
 // multiplayer layer should call setResources(...) with authoritative counts
@@ -31,9 +32,15 @@ export const RESOURCE_LABELS: Record<ResourceKind, string> = {
   wheat: "Wheat",
   stone: "Stone",
 };
-export const resourceCounts: Record<ResourceKind, number> = {
-  wood: 0, brick: 0, sheep: 0, wheat: 0, stone: 0,
-};
+
+const emptyPile = (): Record<ResourceKind, number> => ({ wood: 0, brick: 0, sheep: 0, wheat: 0, stone: 0 });
+// Per-player hand. Pre-sized to MAX_PLAYERS so callers indexing by id never
+// trip a sparse-array read; the active slot count comes from getPlayers().
+export const resourceCounts: Record<ResourceKind, number>[] = Array.from({ length: MAX_PLAYERS }, () => emptyPile());
+
+export function resetAllResources() {
+  for (let i = 0; i < resourceCounts.length; i++) resourceCounts[i] = emptyPile();
+}
 
 // Module-scope callbacks set by main() so cross-cutting concerns (trade panel
 // rate badges, passives badges) can react to resource / placement changes
@@ -71,14 +78,15 @@ export function mountResourceHud() {
   root.appendChild(total);
 }
 
-export function renderResourceHud() {
+export function renderResourceHud(playerId: number = getViewerPlayerId()) {
   const root = document.getElementById("resource-hud");
   if (!root) return;
+  const hand = resourceCounts[playerId] ?? emptyPile();
   let total = 0;
   for (const kind of RESOURCE_ORDER) {
     const cell = root.querySelector<HTMLElement>(`.res[data-res="${kind}"]`);
     if (!cell) continue;
-    const n = resourceCounts[kind];
+    const n = hand[kind];
     cell.dataset.count = String(n);
     const span = cell.querySelector(".count");
     if (span) span.textContent = String(n);
@@ -89,18 +97,32 @@ export function renderResourceHud() {
   onResourcesChanged();
 }
 
-export function setResources(next: Partial<Record<ResourceKind, number>>) {
+export function setResources(playerId: number, next: Partial<Record<ResourceKind, number>>) {
+  const hand = resourceCounts[playerId];
+  if (!hand) return;
   for (const k of RESOURCE_ORDER) {
-    if (next[k] != null) resourceCounts[k] = Math.max(0, Math.floor(next[k]!));
+    if (next[k] != null) hand[k] = Math.max(0, Math.floor(next[k]!));
   }
-  renderResourceHud();
+  if (playerId === getViewerPlayerId()) renderResourceHud(playerId);
+  else onResourcesChanged();
+}
+
+export function getResources(playerId: number): Record<ResourceKind, number> {
+  return { ...(resourceCounts[playerId] ?? emptyPile()) };
 }
 
 // Expose for multiplayer/dev wiring. Replace with real game-state subscription
 // once the netcode is in.
-(window as unknown as { catan?: { setResources: typeof setResources; getResources: () => Record<ResourceKind, number> } }).catan = {
+(window as unknown as {
+  catan?: {
+    setResources: (playerId: number, partial: Partial<Record<ResourceKind, number>>) => void;
+    getResources: (playerId: number) => Record<ResourceKind, number>;
+    getPlayers: () => ReturnType<typeof getPlayers>;
+  };
+}).catan = {
   setResources,
-  getResources: () => ({ ...resourceCounts }),
+  getResources,
+  getPlayers,
 };
 
 // Tile type → producible resource. Desert (no resource) is omitted.
@@ -119,21 +141,26 @@ export const BUILD_COSTS: Record<"settlement" | "city" | "bridge", Partial<Recor
   city:       { wheat: 2, stone: 3 },
 };
 
-export function canAfford(kind: "settlement" | "city" | "bridge"): boolean {
+export function canAfford(kind: "settlement" | "city" | "bridge", playerId: number = getActivePlayerId()): boolean {
   const cost = BUILD_COSTS[kind];
+  const hand = resourceCounts[playerId];
+  if (!hand) return false;
   for (const r of RESOURCE_ORDER) {
-    if ((cost[r] ?? 0) > resourceCounts[r]) return false;
+    if ((cost[r] ?? 0) > hand[r]) return false;
   }
   return true;
 }
 
-export function spendForBuild(kind: "settlement" | "city" | "bridge") {
+export function spendForBuild(kind: "settlement" | "city" | "bridge", playerId: number = getActivePlayerId()) {
   const cost = BUILD_COSTS[kind];
+  const hand = resourceCounts[playerId];
+  if (!hand) return;
   for (const r of RESOURCE_ORDER) {
     const c = cost[r] ?? 0;
-    if (c) resourceCounts[r] = Math.max(0, resourceCounts[r] - c);
+    if (c) hand[r] = Math.max(0, hand[r] - c);
   }
-  renderResourceHud();
+  if (playerId === getViewerPlayerId()) renderResourceHud(playerId);
+  else onResourcesChanged();
 }
 
 // Map ResourceKind → matching 2:1 port type name (board.ts uses TileType
@@ -146,7 +173,9 @@ export const RESOURCE_TO_PORT_TYPE: Record<ResourceKind, PortType> = {
   stone: "mountain",
 };
 
-export function bumpResourceCell(resource: ResourceKind) {
+export function bumpResourceCell(resource: ResourceKind, playerId: number = getViewerPlayerId()) {
+  // Only animate when the bump targets the currently-viewed hand — silent for others.
+  if (playerId !== getViewerPlayerId()) return;
   const root = document.getElementById("resource-hud");
   if (!root) return;
   const cell = root.querySelector<HTMLElement>(`.res[data-res="${resource}"]`);
@@ -164,7 +193,19 @@ export function spawnResourceFly(
   toX: number,
   toY: number,
   delayMs: number,
+  recipientId: number,
 ) {
+  const hand = resourceCounts[recipientId];
+  if (!hand) return;
+  // Non-viewer credits don't fly to a HUD that isn't on screen — just bump the
+  // tally silently so the player-strip badge updates.
+  if (recipientId !== getViewerPlayerId()) {
+    setTimeout(() => {
+      hand[resource] = (hand[resource] ?? 0) + 1;
+      onResourcesChanged();
+    }, delayMs);
+    return;
+  }
   const root = document.getElementById("resource-fx");
   if (!root) return;
   const img = document.createElement("img");
@@ -206,9 +247,9 @@ export function spawnResourceFly(
   );
   anim.onfinish = () => {
     img.remove();
-    resourceCounts[resource] = (resourceCounts[resource] ?? 0) + 1;
-    renderResourceHud();
-    bumpResourceCell(resource);
+    hand[resource] = (hand[resource] ?? 0) + 1;
+    renderResourceHud(recipientId);
+    bumpResourceCell(resource, recipientId);
   };
 }
 
@@ -241,23 +282,24 @@ export function scheduleRollYields(board: Board, layout: HexLayout, view: { tx: 
     const resource = TILE_TO_RESOURCE[tile.type];
     if (!resource) continue;
     const { x: tx, y: ty } = axialToPixel(tile, layout);
-    // Find buildings on this tile's corners; settlement = 1, city = 2.
-    const tileYields: number[] = [];
+    // Per-corner yield credited to the building's owner.
+    type Yield = { ownerId: number; count: number };
+    const tileYields: Yield[] = [];
     for (let i = 0; i < 6; i++) {
       const [cx, cy] = hexCorner(tx, ty, layout.size, i);
-      const kind = buildings.get(vertexKey(cx, cy));
-      if (kind === "settlement") tileYields.push(1);
-      else if (kind === "city") tileYields.push(2);
+      const rec = buildings.get(vertexKey(cx, cy));
+      if (!rec) continue;
+      tileYields.push({ ownerId: rec.ownerId, count: rec.kind === "city" ? 2 : 1 });
     }
     if (!tileYields.length) continue;
     const from = tileScreenCenter(tileIdx, board, layout, view, canvas);
     const to = resourceCellCenter(resource);
     let firstDelayForTile = -1;
-    for (const count of tileYields) {
-      for (let k = 0; k < count; k++) {
+    for (const y of tileYields) {
+      for (let k = 0; k < y.count; k++) {
         const delay = baseDelay + staggerIdx * YIELD_STAGGER_MS;
         if (firstDelayForTile < 0) firstDelayForTile = delay;
-        spawnResourceFly(resource, from.x, from.y, to.x, to.y, delay);
+        spawnResourceFly(resource, from.x, from.y, to.x, to.y, delay, y.ownerId);
         staggerIdx++;
       }
     }

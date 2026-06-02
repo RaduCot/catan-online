@@ -2,7 +2,8 @@
 // quantised world coords so the same corner shared by two land tiles collapses
 // into a single vertex.
 export type BuildingKind = "settlement" | "city";
-export const buildings = new Map<string, BuildingKind>();
+export type BuildingRecord = { kind: BuildingKind; ownerId: number };
+export const buildings = new Map<string, BuildingRecord>();
 export const vertexKey = (x: number, y: number) => `${Math.round(x * 4)}|${Math.round(y * 4)}`;
 
 // Bridges live on hex edges, keyed by edge-midpoint world coords. The variant
@@ -11,7 +12,7 @@ export const vertexKey = (x: number, y: number) => `${Math.round(x * 4)}|${Math.
 export type BridgeVariant = "30up" | "30down" | "straight";
 // Bridge stores the variant + the two endpoint coords so we can stroke a player-
 // colored road along the hex edge underneath the sprite.
-export type BridgeRecord = { variant: BridgeVariant; a: [number, number]; b: [number, number] };
+export type BridgeRecord = { variant: BridgeVariant; a: [number, number]; b: [number, number]; ownerId: number };
 export const bridges = new Map<string, BridgeRecord>();
 export const edgeKey = (x: number, y: number) => `e:${Math.round(x * 4)}|${Math.round(y * 4)}`;
 

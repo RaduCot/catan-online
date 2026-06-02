@@ -2,7 +2,6 @@ import { generateBoard, MapStyle, PortType } from "./board";
 
 import { loadImages, loadPortIcons, loadBuildingImgs, BuildingImgs } from "./assets/loaders";
 
-import { hslToHex } from "./utils/color";
 import { fitLayout, computeMinZoom, clampView, View } from "./camera/layout";
 import { draw } from "./render/scene";
 import { CloudOpts, updateCloudWind } from "./render/clouds";
@@ -52,6 +51,7 @@ import {
   RESOURCE_LABELS,
   RESOURCE_TO_PORT_TYPE,
   resourceCounts,
+  resetAllResources,
   mountResourceHud,
   renderResourceHud,
   spendForBuild,
@@ -68,12 +68,44 @@ import {
   ownedPortTypes,
 } from "./game/trade-rules";
 import { defaultThievesIdx, getThievesTileIdx, setThievesTileIdx } from "./game/thieves";
+import {
+  initPlayers,
+  getPlayers,
+  getPlayer,
+  getActivePlayerId,
+  getViewerPlayerId,
+  setViewerPlayerId,
+  getPlayerColor,
+  DEFAULT_COLORS,
+  DEFAULT_NAMES,
+  MAX_PLAYERS,
+} from "./game/players";
+import {
+  getPhase,
+  setPhase,
+  setTurnOrder,
+  openingAdvance,
+  endTurn,
+  markDiceRolled,
+  resetTurnState,
+  currentBuilderId,
+} from "./game/turn";
+import {
+  startPreMatch,
+  recordRoll,
+  isComplete as preMatchComplete,
+  resolveTurnOrder,
+  tiedTopIds,
+  startTiebreak,
+  getCurrentRollerId,
+  getRolls,
+  getSums,
+} from "./game/pre-match";
 
 async function main() {
   const canvas = document.getElementById("board") as HTMLCanvasElement;
   const ctx = canvas.getContext("2d")!;
   mountResourceHud();
-  renderResourceHud();
   const seedInput = document.getElementById("seed") as HTMLInputElement;
   const radiusInput = document.getElementById("radius") as HTMLInputElement;
   const mapStyleSelect = document.getElementById("mapStyle") as HTMLSelectElement;
@@ -83,6 +115,7 @@ async function main() {
   const ruleFogOfWarInput = document.getElementById("ruleFogOfWar") as HTMLInputElement;
   const ruleGuaranteed68Input = document.getElementById("ruleGuaranteed68") as HTMLInputElement;
   const rollBtn = document.getElementById("roll-toggle") as HTMLButtonElement;
+  const endTurnBtn = document.getElementById("end-turn-btn") as HTMLButtonElement;
   const numScaleInput = document.getElementById("numScale") as HTMLInputElement;
   const numOffXInput = document.getElementById("numOffX") as HTMLInputElement;
   const numOffYInput = document.getElementById("numOffY") as HTMLInputElement;
@@ -115,9 +148,6 @@ async function main() {
   const bridgeStraightRotInput = document.getElementById("bridgeStraightRot") as HTMLInputElement;
   const thievesScaleInput = document.getElementById("thievesScale") as HTMLInputElement;
   const thievesOffYInput = document.getElementById("thievesOffY") as HTMLInputElement;
-  const buildingHueInput = document.getElementById("buildingHue") as HTMLInputElement;
-  const buildingSatInput = document.getElementById("buildingSat") as HTMLInputElement;
-  const buildingLightInput = document.getElementById("buildingLight") as HTMLInputElement;
   const buildingBlendInput = document.getElementById("buildingBlend") as HTMLSelectElement;
   const pathWidthInput = document.getElementById("pathWidth") as HTMLInputElement;
   const pathBlendInput = document.getElementById("pathBlend") as HTMLSelectElement;
@@ -156,10 +186,57 @@ async function main() {
   const fogColorInput = document.getElementById("fogColor") as HTMLInputElement;
   const fogOpacityInput = document.getElementById("fogOpacity") as HTMLInputElement;
   const regenBtn = document.getElementById("regen") as HTMLButtonElement;
+  const playerCountSelect = document.getElementById("playerCount") as HTMLSelectElement;
+  const playerSlotsDiv = document.getElementById("player-slots") as HTMLDivElement;
+  const viewerSelect = document.getElementById("viewerSelect") as HTMLSelectElement;
+  const playersApplyBtn = document.getElementById("players-apply") as HTMLButtonElement;
+  const playerStrip = document.getElementById("player-strip") as HTMLDivElement;
+  const prematchBackdrop = document.getElementById("prematch-backdrop") as HTMLDivElement;
+  const prematchRows = document.getElementById("prematch-rows") as HTMLDivElement;
+  const prematchRollBtn = document.getElementById("prematch-roll") as HTMLButtonElement;
+  const prematchTiebreakBtn = document.getElementById("prematch-tiebreak") as HTMLButtonElement;
+  const prematchStartBtn = document.getElementById("prematch-start") as HTMLButtonElement;
 
   const images = await loadImages();
   const portIcons = await loadPortIcons();
   const buildingImgs: BuildingImgs = await loadBuildingImgs();
+
+  // --- Player config UI (slot inputs) ---
+  // Local config that gets applied via initPlayers on Apply / regen.
+  const slotNames: string[] = DEFAULT_NAMES.slice();
+  const slotColors: string[] = DEFAULT_COLORS.slice();
+  function renderPlayerSlots() {
+    const n = Number(playerCountSelect.value) || 4;
+    playerSlotsDiv.innerHTML = "";
+    for (let i = 0; i < n; i++) {
+      const row = document.createElement("label");
+      row.style.display = "flex";
+      row.style.alignItems = "center";
+      row.style.gap = "6px";
+      const lbl = document.createElement("span");
+      lbl.className = "lbl";
+      lbl.textContent = `P${i + 1}`;
+      const nameInput = document.createElement("input");
+      nameInput.type = "text";
+      nameInput.value = slotNames[i];
+      nameInput.style.width = "70px";
+      nameInput.addEventListener("input", () => { slotNames[i] = nameInput.value; });
+      const colorInput = document.createElement("input");
+      colorInput.type = "color";
+      colorInput.value = slotColors[i];
+      colorInput.style.width = "30px";
+      colorInput.addEventListener("input", () => { slotColors[i] = colorInput.value; });
+      row.appendChild(lbl);
+      row.appendChild(nameInput);
+      row.appendChild(colorInput);
+      playerSlotsDiv.appendChild(row);
+    }
+  }
+  renderPlayerSlots();
+  playerCountSelect.addEventListener("change", renderPlayerSlots);
+
+  // Default 4 players at startup so resources/reveal indexing has slots.
+  initPlayers(4, slotColors, slotNames);
 
   let board = generateBoard(
     Number(seedInput.value) || 0,
@@ -172,12 +249,18 @@ async function main() {
 
   // refreshPassivesAndTrade is local — assigned later from the trade UI block.
   let refreshPassivesAndTrade: () => void = () => {};
+  let refreshPlayerStrip: () => void = () => {};
+  let refreshTopButtons: () => void = () => {};
 
   function resize() {
     dpr = window.devicePixelRatio || 1;
     canvas.width = Math.floor(window.innerWidth * dpr);
     canvas.height = Math.floor(window.innerHeight * dpr);
     render();
+  }
+
+  function ownerColor(id: number): string {
+    return getPlayerColor(id);
   }
 
   function render() {
@@ -267,11 +350,7 @@ async function main() {
           },
         };
       })(),
-      color: hslToHex(
-        Number(buildingHueInput.value) || 0,
-        Number(buildingSatInput.value) || 70,
-        Number(buildingLightInput.value) || 50
-      ),
+      getOwnerColor: ownerColor,
       blend: (buildingBlendInput.value as GlobalCompositeOperation) || "overlay",
       pathWidth: Math.max(0, Number(pathWidthInput.value) || 0),
       pathBlend: (pathBlendInput.value as GlobalCompositeOperation) || "source-over",
@@ -290,9 +369,13 @@ async function main() {
         : null,
     };
     const placementGraph = buildPlacementGraph(board, layout);
-    const validV = validSettlementVertices(placementGraph);
-    const validC = validCityVertices();
-    const validE = validBridgeEdges(placementGraph);
+    // Hide hints when viewer != current builder (they shouldn't see where
+    // someone else can place). During pre-match / roll, no hints either.
+    const phase = getPhase();
+    const showHints = (phase === "opening" || phase === "main") && currentBuilderId() === getViewerPlayerId();
+    const validV = showHints ? validSettlementVertices(placementGraph) : new Set<string>();
+    const validC = showHints ? validCityVertices() : new Set<string>();
+    const validE = showHints ? validBridgeEdges(placementGraph) : new Set<string>();
     const mouseWX = mouseX < 0 ? -1e9 : (mouseX - view.tx) / view.zoom;
     const mouseWY = mouseY < 0 ? -1e9 : (mouseY - view.ty) / view.zoom;
     const hoverSnap = snapPlacementHover(placementGraph, validV, validC, validE, mouseWX, mouseWY, layout.size);
@@ -306,7 +389,7 @@ async function main() {
         hover: hoverSnap,
       },
       buildingImgs,
-      color: buildingOpts.color,
+      hintColor: ownerColor(currentBuilderId()),
       blend: buildingOpts.blend,
       bridgeTuning: buildingOpts.bridgeTuning,
       buildingScale: buildingOpts.buildingScale,
@@ -332,6 +415,13 @@ async function main() {
     if (tileSheenAnimationRunning()) needsRender = true;
     if (buildingScaleAnimationRunning(t, board.tiles.length)) needsRender = true;
     if (placementBounceAnimationRunning()) needsRender = true;
+    // Watch for end-of-dice transition: while dice are visible but animation
+    // settled, advance roll → main once.
+    if (diceJustFinished(t)) {
+      markDiceRolled();
+      refreshTopButtons();
+      needsRender = true;
+    }
     // Placement-hint pulse + marching-ant dashes need a steady redraw whenever
     // hints are on-screen: during the forced opening, or while the cursor is
     // over the canvas in free mode.
@@ -417,10 +507,29 @@ async function main() {
   }
   requestAnimationFrame(tick);
 
+  // Track when the dice animation has just finished so we can phase-shift
+  // roll → main exactly once per dice toss. dice.visible flips to false
+  // inside diceAnimationRunning() when the panel fully fades out.
+  let dicePrevVisible = false;
+  function diceJustFinished(_t: number): boolean {
+    void _t;
+    const visible = dice.visible;
+    const finished = dicePrevVisible && !visible;
+    dicePrevVisible = visible;
+    return finished;
+  }
+
+  function resetSharedReveal() {
+    rebuildRevealOrders(board);
+    reveal.animStart = performance.now();
+    const layout = fitLayout(board, canvas.clientWidth, canvas.clientHeight);
+    applyRevealModeReset(board, layout);
+  }
+
   function restartGameState() {
     buildings.clear();
     bridges.clear();
-    for (const r of RESOURCE_ORDER) resourceCounts[r] = 0;
+    resetAllResources();
     renderResourceHud();
     setPlacementStep("initial-s1");
     setLastInitialSettlementKey(null);
@@ -429,11 +538,12 @@ async function main() {
     dice.matchOrder = [];
     dice.visible = false;
     setThievesTileIdx(defaultThievesIdx(board));
-    const layout = fitLayout(board, canvas.clientWidth, canvas.clientHeight);
-    rebuildRevealOrders(board);
-    reveal.animStart = performance.now();
-    applyRevealModeReset(board, layout);
+    resetSharedReveal();
+    resetTurnState();
     refreshPassivesAndTrade();
+    refreshPlayerStrip();
+    refreshTopButtons();
+    openPreMatchModal();
   }
 
   function regen() {
@@ -519,9 +629,24 @@ async function main() {
   mapStyleSelect.addEventListener("change", regen);
   imgScaleInput.addEventListener("input", render);
   rollBtn.addEventListener("click", () => {
+    if (getPhase() !== "roll") return;
     rollDice(board);
     const layout = fitLayout(board, canvas.clientWidth, canvas.clientHeight);
+    // Dice yields credit each building's owner; only the viewer's gains fly.
     scheduleRollYields(board, layout, view, canvas);
+    refreshTopButtons();
+    render();
+  });
+  endTurnBtn.addEventListener("click", () => {
+    if (getPhase() !== "main") return;
+    endTurn();
+    // Snap viewer back to active when ending a turn — debug peeks are reset
+    // so the new active player sees their own hand on entry.
+    setViewerPlayerId(getActivePlayerId());
+    renderResourceHud(getViewerPlayerId());
+    refreshPassivesAndTrade();
+    refreshPlayerStrip();
+    refreshTopButtons();
     render();
   });
   canvas.addEventListener("click", (e) => {
@@ -536,6 +661,12 @@ async function main() {
     // running so clicks can't land on still-flipping cards. Fog and all-visible
     // modes flip individual tiles asynchronously, so don't lock the UI.
     if (getRevealMode() === "default" && revealAnimationRunning(performance.now(), board.tiles.length)) return;
+    // Phase gating: only opening + main allow placement, and only when the
+    // viewer is the active builder (in opening, the builder follows the snake
+    // pointer, not the active id).
+    const phase = getPhase();
+    if (phase !== "opening" && phase !== "main") return;
+    if (currentBuilderId() !== getViewerPlayerId()) return;
     const rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
@@ -548,16 +679,17 @@ async function main() {
     const validE = validBridgeEdges(graph);
     const snap = snapPlacementHover(graph, validV, validC, validE, wx, wy, layout.size);
     if (!snap) return;
+    const builderId = currentBuilderId();
     if (snap.kind === "vertex") {
       const v = graph.vertices.get(snap.key);
       if (!v) return;
       if (validC.has(snap.key)) {
         // Upgrade settlement → city (free mode only — validCityVertices is
         // empty during the opening sequence).
-        buildings.set(snap.key, "city");
-        spendForBuild("city");
+        buildings.set(snap.key, { kind: "city", ownerId: builderId });
+        spendForBuild("city", builderId);
       } else {
-        buildings.set(snap.key, "settlement");
+        buildings.set(snap.key, { kind: "settlement", ownerId: builderId });
         if (getPlacementStep() === "initial-s1") {
           setLastInitialSettlementKey(snap.key);
           setPlacementStep("initial-b1");
@@ -565,46 +697,64 @@ async function main() {
           setLastInitialSettlementKey(snap.key);
           setPlacementStep("initial-b2");
         } else {
-          spendForBuild("settlement");
+          spendForBuild("settlement", builderId);
         }
       }
       placementBounce.set(snap.key, performance.now());
+      if (phase === "opening") openingAdvance();
     } else {
       const e2 = graph.edges.get(snap.key);
       if (!e2) return;
-      bridges.set(snap.key, { variant: e2.variant, a: e2.a, b: e2.b });
+      bridges.set(snap.key, { variant: e2.variant, a: e2.a, b: e2.b, ownerId: builderId });
       placementBounce.set(snap.key, performance.now());
       if (getPlacementStep() === "initial-b1") {
         setPlacementStep("initial-s2");
         setLastInitialSettlementKey(null);
+        if (phase === "opening") openingAdvance();
       } else if (getPlacementStep() === "initial-b2") {
-        setPlacementStep("free");
-        setLastInitialSettlementKey(null);
-        // Opening complete — reshuffle chance numbers to honour the
-        // guaranteed-6/8 rule (no-op if the rule is off). Done before the
-        // reveal kicks in so the staggered flip shows the new numbers.
-        reshuffleFor68Rule(board, fitLayout(board, canvas.clientWidth, canvas.clientHeight));
-        // In default mode flip every tile face-up via the staggered global
-        // animation. In fog mode flip the tiles the player has already
-        // explored (settlements + bridge endpoints) and leave the rest
-        // face-down. All-visible has nothing to do.
-        if (getRevealMode() === "default") {
-          rebuildRevealOrders(board);
-          reveal.animStart = performance.now();
-          reveal.hidden = false;
-        } else if (getRevealMode() === "fog") {
-          const layout2 = fitLayout(board, canvas.clientWidth, canvas.clientHeight);
-          const t = performance.now();
-          for (const i of exploredTileIndices(board, layout2)) {
-            if (!tileRevealAt.has(i)) tileRevealAt.set(i, t);
+        // End of this player's opening pair. If snake-order has more slots,
+        // the next placer is the next snake entry; otherwise opening is done.
+        if (phase === "opening") openingAdvance();
+        const stillOpening = getPhase() === "opening";
+        if (stillOpening) {
+          // Next player's S1.
+          setPlacementStep("initial-s1");
+          setLastInitialSettlementKey(null);
+        } else {
+          setPlacementStep("free");
+          setLastInitialSettlementKey(null);
+          // Opening complete — reshuffle chance numbers to honour the
+          // guaranteed-6/8 rule (no-op if the rule is off). Done before the
+          // reveal kicks in so the staggered flip shows the new numbers.
+          reshuffleFor68Rule(board, fitLayout(board, canvas.clientWidth, canvas.clientHeight), 0);
+          // In default mode flip every tile face-up via the staggered global
+          // animation. In fog mode flip the tiles each player has already
+          // explored and leave the rest face-down. All-visible has nothing
+          // to do.
+          if (getRevealMode() === "default") {
+            rebuildRevealOrders(board);
+            reveal.animStart = performance.now();
+            reveal.hidden = false;
+          } else if (getRevealMode() === "fog") {
+            const layout2 = fitLayout(board, canvas.clientWidth, canvas.clientHeight);
+            const t = performance.now();
+            for (const p of getPlayers()) {
+              let m = tileRevealAt.get(p.id);
+              if (!m) { m = new Map(); tileRevealAt.set(p.id, m); }
+              for (const i of exploredTileIndices(p.id, board, layout2)) {
+                if (!m.has(i)) m.set(i, t);
+              }
+            }
           }
         }
-      } else {
-        spendForBuild("bridge");
+      } else if (getPlacementStep() === "free") {
+        spendForBuild("bridge", builderId);
       }
     }
     refreshFogReveals(board, fitLayout(board, canvas.clientWidth, canvas.clientHeight));
     refreshPassivesAndTrade();
+    refreshPlayerStrip();
+    refreshTopButtons();
     render();
   });
   restartBtn.addEventListener("click", () => {
@@ -620,7 +770,7 @@ async function main() {
   innerGlowFeatherInput.addEventListener("input", render);
   foamColorInput.addEventListener("input", render);
   lakeFoamColorInput.addEventListener("input", render);
-  for (const el of [portGlowColorInput, portGlowSizeInput, portGlowFeatherInput, portGlowOpacityInput, portGlowBlendInput, portCenterOffsetInput, portItemsGapInput, portIconSizeInput, portTextSizeInput, settlementScaleInput, settlementOffYInput, cityScaleInput, cityOffYInput, bridge30ScaleInput, bridge30OffXInput, bridge30OffYInput, bridge30RotInput, bridgeStraightScaleInput, bridgeStraightOffXInput, bridgeStraightOffYInput, bridgeStraightRotInput, thievesScaleInput, thievesOffYInput, buildingHueInput, buildingSatInput, buildingLightInput, buildingBlendInput, pathWidthInput, pathBlendInput, shadowBlendInput, shadowAngleInput, shadowSpreadInput, shadowFeatherInput, shadowOpacityInput]) {
+  for (const el of [portGlowColorInput, portGlowSizeInput, portGlowFeatherInput, portGlowOpacityInput, portGlowBlendInput, portCenterOffsetInput, portItemsGapInput, portIconSizeInput, portTextSizeInput, settlementScaleInput, settlementOffYInput, cityScaleInput, cityOffYInput, bridge30ScaleInput, bridge30OffXInput, bridge30OffYInput, bridge30RotInput, bridgeStraightScaleInput, bridgeStraightOffXInput, bridgeStraightOffYInput, bridgeStraightRotInput, thievesScaleInput, thievesOffYInput, buildingBlendInput, pathWidthInput, pathBlendInput, shadowBlendInput, shadowAngleInput, shadowSpreadInput, shadowFeatherInput, shadowOpacityInput]) {
     el.addEventListener("input", render);
     el.addEventListener("change", render);
   }
@@ -677,8 +827,12 @@ async function main() {
     return { rate: 4, label: "4:1 default" };
   }
 
+  function activeHand(): Record<ResourceKind, number> {
+    return resourceCounts[getActivePlayerId()] ?? emptyPile();
+  }
   function currentPorts(): Set<PortType> {
-    return ownedPortTypes(board, fitLayout(board, canvas.clientWidth, canvas.clientHeight));
+    // Bank trade only ever runs for the active player.
+    return ownedPortTypes(getActivePlayerId(), board, fitLayout(board, canvas.clientWidth, canvas.clientHeight));
   }
 
   function makeTradeBtn(k: ResourceKind): HTMLButtonElement {
@@ -746,10 +900,11 @@ async function main() {
 
   function refreshStandardTradeUI() {
     const ports = currentPorts();
+    const hand = activeHand();
     for (const child of Array.from(tradeGiveRow.children) as HTMLButtonElement[]) {
       const res = child.dataset.res as ResourceKind;
       const rate = tradeRateFor(res, ports);
-      const stock = resourceCounts[res];
+      const stock = hand[res];
       const stockSpan = child.querySelector(".stock")!;
       stockSpan.textContent = `${stock} (× ${rate})`;
       // Rate pill — only visible when the player benefits from a port for
@@ -788,20 +943,21 @@ async function main() {
       tradeSummaryEl.textContent = "Pick what to give.";
     }
     const ok = tradeGiveSingle != null && tradeGet != null && tradeGiveSingle !== tradeGet
-      && resourceCounts[tradeGiveSingle] >= tradeRateFor(tradeGiveSingle, ports);
+      && hand[tradeGiveSingle] >= tradeRateFor(tradeGiveSingle, ports);
     tradeConfirmBtn.disabled = !ok;
     tradeResetBtn.style.display = "none";
   }
 
   function refreshMixedTradeUI() {
     const ports = currentPorts();
+    const hand = activeHand();
     const { rate, label } = pileTargetRate(tradeGivePile, ports);
     const total = pileTotal(tradeGivePile);
 
     for (const child of Array.from(tradeGiveRow.children) as HTMLButtonElement[]) {
       const res = child.dataset.res as ResourceKind;
       const pileCount = tradeGivePile[res];
-      const stock = resourceCounts[res];
+      const stock = hand[res];
       const stockSpan = child.querySelector(".stock")!;
       stockSpan.textContent = String(stock);
       let badge = child.querySelector(".pile-badge") as HTMLSpanElement | null;
@@ -850,7 +1006,11 @@ async function main() {
     tradeBackdrop.classList.add("hidden");
   }
 
-  tradeToggleBtn.addEventListener("click", openTrade);
+  tradeToggleBtn.addEventListener("click", () => {
+    // Bank trade is active-player only.
+    if (getPhase() !== "main" || getActivePlayerId() !== getViewerPlayerId()) return;
+    openTrade();
+  });
   tradeCancelBtn.addEventListener("click", closeTrade);
   tradeBackdrop.addEventListener("click", (e) => {
     if (e.target === tradeBackdrop) closeTrade();
@@ -865,26 +1025,28 @@ async function main() {
   tradeConfirmBtn.addEventListener("click", () => {
     if (!tradeGet) return;
     const ports = currentPorts();
+    const hand = activeHand();
     if (getBankTradeRule() === "standard") {
       if (!tradeGiveSingle || tradeGiveSingle === tradeGet) return;
       const rate = tradeRateFor(tradeGiveSingle, ports);
-      if (resourceCounts[tradeGiveSingle] < rate) return;
-      resourceCounts[tradeGiveSingle] -= rate;
+      if (hand[tradeGiveSingle] < rate) return;
+      hand[tradeGiveSingle] -= rate;
     } else {
       const { rate } = pileTargetRate(tradeGivePile, ports);
       if (pileTotal(tradeGivePile) !== rate) return;
       for (const r of RESOURCE_ORDER) {
         const give = tradeGivePile[r];
-        if (give > 0) resourceCounts[r] = Math.max(0, resourceCounts[r] - give);
+        if (give > 0) hand[r] = Math.max(0, hand[r] - give);
       }
       tradeGivePile = emptyPile();
     }
-    resourceCounts[tradeGet] += 1;
+    hand[tradeGet] += 1;
     const gainedRes = tradeGet;
     tradeGiveSingle = null;
     tradeGet = null;
-    renderResourceHud();
-    bumpResourceCell(gainedRes);
+    renderResourceHud(getViewerPlayerId());
+    bumpResourceCell(gainedRes, getActivePlayerId());
+    refreshPlayerStrip();
     refreshTradeUI();
   });
 
@@ -947,12 +1109,174 @@ async function main() {
     }
     passivesPanel.classList.toggle("hidden", passivesPanel.children.length === 0);
   }
-  setOnResourcesChanged(refreshTradeUI);
+  setOnResourcesChanged(() => { refreshTradeUI(); refreshPlayerStrip(); });
   refreshPassivesAndTrade = () => { renderPassives(); refreshTradeUI(); };
   renderPassives();
 
+  // --- Player strip badges + viewer select ---
+  function rebuildViewerSelect() {
+    viewerSelect.innerHTML = "";
+    for (const p of getPlayers()) {
+      const opt = document.createElement("option");
+      opt.value = String(p.id);
+      opt.textContent = `${p.name} (P${p.id + 1})`;
+      viewerSelect.appendChild(opt);
+    }
+    viewerSelect.value = String(getViewerPlayerId());
+  }
+  viewerSelect.addEventListener("change", () => {
+    const id = Number(viewerSelect.value) || 0;
+    setViewerPlayerId(id);
+    renderResourceHud(id);
+    refreshPlayerStrip();
+    refreshPassivesAndTrade();
+    render();
+  });
+
+  refreshPlayerStrip = () => {
+    playerStrip.innerHTML = "";
+    const activeId = getActivePlayerId();
+    const viewerId = getViewerPlayerId();
+    for (const p of getPlayers()) {
+      const badge = document.createElement("div");
+      badge.className = "pbadge";
+      if (p.id === activeId) badge.classList.add("active");
+      if (p.id === viewerId) badge.classList.add("viewer");
+      const sw = document.createElement("span");
+      sw.className = "swatch";
+      sw.style.background = p.color;
+      const name = document.createElement("span");
+      name.className = "pname";
+      name.textContent = p.name;
+      const cards = document.createElement("span");
+      cards.className = "pcards";
+      const hand = resourceCounts[p.id];
+      let total = 0;
+      if (hand) for (const r of RESOURCE_ORDER) total += hand[r];
+      cards.textContent = `${total}🂠`;
+      badge.appendChild(sw);
+      badge.appendChild(name);
+      badge.appendChild(cards);
+      badge.addEventListener("click", () => {
+        setViewerPlayerId(p.id);
+        renderResourceHud(p.id);
+        refreshPlayerStrip();
+        refreshPassivesAndTrade();
+        viewerSelect.value = String(p.id);
+        render();
+      });
+      playerStrip.appendChild(badge);
+    }
+  };
+
+  refreshTopButtons = () => {
+    const phase = getPhase();
+    rollBtn.disabled = phase !== "roll";
+    endTurnBtn.disabled = phase !== "main";
+    tradeToggleBtn.disabled = !(phase === "main" && getActivePlayerId() === getViewerPlayerId());
+  };
+
+  // --- Pre-match modal ---
+  function renderPreMatchRows() {
+    prematchRows.innerHTML = "";
+    const rolls = getRolls();
+    const sums = getSums();
+    const currentId = getCurrentRollerId();
+    for (const p of getPlayers()) {
+      const row = document.createElement("div");
+      row.className = "row";
+      if (p.id === currentId && !preMatchComplete()) row.classList.add("active");
+      const sw = document.createElement("span");
+      sw.className = "swatch";
+      sw.style.background = p.color;
+      const name = document.createElement("span");
+      name.className = "name";
+      name.textContent = p.name;
+      const r = document.createElement("span");
+      r.className = "rolls";
+      r.textContent = `Rolls: ${(rolls[p.id] ?? []).length} / 3`;
+      const sumEl = document.createElement("span");
+      sumEl.className = "sum";
+      sumEl.textContent = String(sums.find((s) => s.id === p.id)?.sum ?? 0);
+      row.appendChild(sw);
+      row.appendChild(name);
+      row.appendChild(r);
+      row.appendChild(sumEl);
+      prematchRows.appendChild(row);
+    }
+    if (preMatchComplete()) {
+      const order = resolveTurnOrder();
+      if (order == null) {
+        prematchRollBtn.style.display = "none";
+        prematchTiebreakBtn.style.display = "";
+        prematchStartBtn.style.display = "none";
+      } else {
+        prematchRollBtn.style.display = "none";
+        prematchTiebreakBtn.style.display = "none";
+        prematchStartBtn.style.display = "";
+      }
+    } else {
+      prematchRollBtn.style.display = "";
+      prematchTiebreakBtn.style.display = "none";
+      prematchStartBtn.style.display = "none";
+    }
+  }
+  function openPreMatchModal() {
+    startPreMatch(getPlayers().length);
+    prematchBackdrop.classList.remove("hidden");
+    renderPreMatchRows();
+  }
+  function closePreMatchModal() {
+    prematchBackdrop.classList.add("hidden");
+  }
+  prematchRollBtn.addEventListener("click", () => {
+    // Roll 2d6 via the existing dice overlay; record the sum into pre-match.
+    rollDice(board);
+    const sum = dice.dice[0] + dice.dice[1];
+    recordRoll(sum);
+    renderPreMatchRows();
+    render();
+  });
+  prematchTiebreakBtn.addEventListener("click", () => {
+    startTiebreak(tiedTopIds());
+    renderPreMatchRows();
+  });
+  prematchStartBtn.addEventListener("click", () => {
+    const order = resolveTurnOrder();
+    if (!order) return;
+    setTurnOrder(order);
+    setPhase("opening");
+    // First builder is turnOrder[0]; sync the viewer perspective to them so
+    // the placing player sees their hints by default.
+    setViewerPlayerId(order[0]);
+    viewerSelect.value = String(order[0]);
+    renderResourceHud(order[0]);
+    closePreMatchModal();
+    refreshPlayerStrip();
+    refreshTopButtons();
+    refreshPassivesAndTrade();
+    render();
+  });
+
+  // --- Players section apply ---
+  playersApplyBtn.addEventListener("click", () => {
+    const n = Number(playerCountSelect.value) || 4;
+    initPlayers(n, slotColors, slotNames);
+    rebuildViewerSelect();
+    regen();
+  });
+
+  rebuildViewerSelect();
+  refreshPlayerStrip();
+  refreshTopButtons();
+
+  // Kick off the first pre-match modal once everything is mounted.
+  openPreMatchModal();
+
   resize();
   console.log(`board: seed=${board.seed} radius=${board.radius} tiles=${board.tiles.length}`);
+  // Touch the import so unused-symbol lints don't strip MAX_PLAYERS / getPlayer.
+  void MAX_PLAYERS; void getPlayer;
 }
 
 main();

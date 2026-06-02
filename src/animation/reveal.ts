@@ -2,6 +2,7 @@ import { Board } from "../board";
 import { HexLayout } from "../hex";
 import { easeOutBack } from "../utils/easing";
 import { getPlacementStep, exploredTileIndices } from "../game/placement";
+import { getActivePlayerId, getViewerPlayerId, getPlayers } from "../game/players";
 
 // Reveal animation state. Cards start hidden; when the user clicks "reveal
 // board" the tiles flip up one by one (staggered) and once they're all visible
@@ -62,9 +63,15 @@ export function setRevealMode(v: RevealMode) {
   revealMode = v;
 }
 
-// Per-tile flip start times (perf.now ms). Populated in fog / all-visible
-// modes; ignored in default mode (which uses reveal.tileOrder staggering).
-export const tileRevealAt = new Map<number, number>();
+// Per-player, per-tile flip start times (perf.now ms). Populated in fog /
+// all-visible modes; ignored in default mode (which uses reveal.tileOrder).
+export const tileRevealAt = new Map<number, Map<number, number>>();
+
+function mapFor(playerId: number): Map<number, number> {
+  let m = tileRevealAt.get(playerId);
+  if (!m) { m = new Map(); tileRevealAt.set(playerId, m); }
+  return m;
+}
 
 export function revealProgress(now: number, totalTiles: number) {
   const elapsed = (now - reveal.animStart) / 1000;
@@ -74,9 +81,10 @@ export function revealProgress(now: number, totalTiles: number) {
 }
 
 // Returns t (-Inf, 0, ..., 1, >1): <0 not started, 0-1 mid-flip, >1 finished.
+// Reads against the viewer's reveal map — what does *this* player see.
 export function tileRevealProgress(i: number, now: number, totalTiles: number): number {
   if (revealMode !== "default") {
-    const start = tileRevealAt.get(i);
+    const start = mapFor(getViewerPlayerId()).get(i);
     if (start == null) return -Infinity;
     return ((now - start) / 1000) / TILE_FLIP_DURATION;
   }
@@ -88,7 +96,7 @@ export function tileRevealProgress(i: number, now: number, totalTiles: number): 
 
 export function numberRevealProgress(i: number, now: number, totalTiles: number): number {
   if (revealMode !== "default") {
-    const start = tileRevealAt.get(i);
+    const start = mapFor(getViewerPlayerId()).get(i);
     if (start == null) return -Infinity;
     const elapsedSec = (now - start) / 1000;
     const numStart = TILE_FLIP_DURATION + 0.05;
@@ -102,7 +110,7 @@ export function numberRevealProgress(i: number, now: number, totalTiles: number)
 
 export function revealAnimationRunning(now: number, totalTiles: number) {
   if (revealMode !== "default") {
-    for (const start of tileRevealAt.values()) {
+    for (const start of mapFor(getViewerPlayerId()).values()) {
       const elapsedSec = (now - start) / 1000;
       const totalEnd = TILE_FLIP_DURATION + 0.05 + NUMBER_POP_DURATION + 0.05;
       if (elapsedSec < totalEnd) return true;
@@ -151,20 +159,21 @@ export function buildingScaleAnimationRunning(now: number, totalTiles: number) {
   return elapsed >= 0 && elapsed < growStart + BUILD_REVEAL_GROW_DUR + 0.05;
 }
 
-// Add reveal entries for any newly-explored tile in fog mode. Idempotent.
-// The opening (S→B→S→B) stays fully face-down even in fog mode — the per-tile
-// scouting only kicks in once the player is in free-play.
+// Add reveal entries for the *active* player's newly-explored tiles in fog
+// mode. Idempotent. The opening (S→B→S→B) stays fully face-down even in fog
+// mode — the per-tile scouting only kicks in once the player is in free-play.
 export function refreshFogReveals(board: Board, layout: HexLayout) {
   if (revealMode !== "fog" || getPlacementStep() !== "free") return;
   const t = performance.now();
-  const explored = exploredTileIndices(board, layout);
-  for (const i of explored) {
-    if (!tileRevealAt.has(i)) tileRevealAt.set(i, t);
+  const id = getActivePlayerId();
+  const map = mapFor(id);
+  for (const i of exploredTileIndices(id, board, layout)) {
+    if (!map.has(i)) map.set(i, t);
   }
 }
 
 // Reset reveal bookkeeping for the requested mode. Call on mode change and on
-// game restart.
+// game restart. Touches every player's map.
 export function applyRevealModeReset(board: Board, layout: HexLayout) {
   tileRevealAt.clear();
   if (revealMode === "default") {
@@ -173,11 +182,19 @@ export function applyRevealModeReset(board: Board, layout: HexLayout) {
   }
   reveal.hidden = false;
   const t = performance.now();
+  const playerIds = getPlayers().map((p) => p.id);
+  const ids = playerIds.length ? playerIds : [0];
   if (revealMode === "all-visible") {
-    for (let i = 0; i < board.tiles.length; i++) tileRevealAt.set(i, t);
+    for (const id of ids) {
+      const m = mapFor(id);
+      for (let i = 0; i < board.tiles.length; i++) m.set(i, t);
+    }
   } else if (revealMode === "fog" && getPlacementStep() === "free") {
-    // Mid-game flip: seed entries for everything currently explored. During
-    // the opening we leave the map face-down on purpose.
-    for (const i of exploredTileIndices(board, layout)) tileRevealAt.set(i, t);
+    // Mid-game flip: seed entries for everything each player has explored.
+    // During the opening we leave the map face-down on purpose.
+    for (const id of ids) {
+      const m = mapFor(id);
+      for (const i of exploredTileIndices(id, board, layout)) m.set(i, t);
+    }
   }
 }

@@ -212,8 +212,86 @@
         cursor: not-allowed;
       }
 
+      #player-strip {
+        position: fixed; top: 8px; left: 50%; transform: translateX(-50%);
+        z-index: 10; display: flex; gap: 8px;
+        background: rgba(0, 0, 0, 0.55);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 999px;
+        padding: 6px 10px;
+        backdrop-filter: blur(6px);
+        -webkit-backdrop-filter: blur(6px);
+      }
+      #player-strip .pbadge {
+        display: flex; align-items: center; gap: 6px;
+        padding: 4px 10px; border-radius: 999px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 2px solid transparent;
+        cursor: pointer; user-select: none;
+        font-size: 12px;
+      }
+      #player-strip .pbadge:hover { background: rgba(255, 255, 255, 0.08); }
+      #player-strip .pbadge.active { border-color: #f4c75a; box-shadow: 0 0 0 1px rgba(244,199,90,0.35); }
+      #player-strip .pbadge.viewer { background: rgba(244, 199, 90, 0.12); }
+      #player-strip .pbadge .swatch {
+        width: 14px; height: 14px; border-radius: 4px;
+        box-shadow: inset 0 0 0 1px rgba(0,0,0,0.4);
+      }
+      #player-strip .pbadge .pname { font-weight: 700; }
+      #player-strip .pbadge .pcards { opacity: 0.75; font-variant-numeric: tabular-nums; }
+
+      #end-turn-btn {
+        background: #f4c75a; color: #1b2434; border: none;
+        border-radius: 10px; padding: 0 16px; cursor: pointer;
+        font: inherit; font-weight: 700;
+      }
+      #end-turn-btn:disabled { background: rgba(244,199,90,0.2); color: rgba(255,255,255,0.4); cursor: not-allowed; }
+
+      .modal-backdrop {
+        position: fixed; inset: 0; z-index: 30;
+        background: rgba(0, 0, 0, 0.6);
+        backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+        display: flex; align-items: center; justify-content: center;
+      }
+      .modal-backdrop.hidden { display: none; }
+      #prematch-panel {
+        min-width: 380px; max-width: 90vw;
+        background: rgba(20, 26, 38, 0.96);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 14px;
+        padding: 18px 20px 16px;
+        box-shadow: 0 14px 40px rgba(0, 0, 0, 0.55);
+        color: #eee; font-size: 13px;
+      }
+      #prematch-panel h3 { margin: 0 0 12px; font-size: 15px; }
+      #prematch-rows { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; }
+      #prematch-rows .row {
+        display: flex; align-items: center; gap: 10px;
+        padding: 6px 10px; border-radius: 8px;
+        background: rgba(255,255,255,0.03);
+      }
+      #prematch-rows .row.active { background: rgba(244,199,90,0.14); border: 1px solid rgba(244,199,90,0.4); }
+      #prematch-rows .swatch { width: 14px; height: 14px; border-radius: 4px; }
+      #prematch-rows .row .name { flex: 1; font-weight: 600; }
+      #prematch-rows .row .rolls { opacity: 0.7; font-variant-numeric: tabular-nums; }
+      #prematch-rows .row .sum { font-weight: 700; color: #f4c75a; min-width: 32px; text-align: right; }
+      #prematch-panel .actions {
+        display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px;
+      }
+      #prematch-panel .actions button {
+        padding: 7px 14px; border-radius: 6px; font: inherit;
+        cursor: pointer; border: 1px solid rgba(255,255,255,0.15);
+        background: rgba(255,255,255,0.05); color: #eee;
+      }
+      #prematch-panel .actions .primary {
+        background: #f4c75a; color: #1b2434; border: none; font-weight: 700;
+      }
+      #prematch-panel .actions .primary:disabled {
+        background: rgba(244,199,90,0.2); color: rgba(255,255,255,0.4); cursor: not-allowed;
+      }
+
       #passives-panel {
-        position: fixed; top: 8px; right: 8px; z-index: 10;
+        position: fixed; top: 56px; right: 8px; z-index: 10;
         display: flex; flex-direction: column; gap: 4px;
         align-items: flex-end;
       }
@@ -272,6 +350,7 @@
         <button id="hud-toggle" aria-expanded="true" aria-controls="hud-panel">controls ▾</button>
         <button id="restart-toggle" type="button">restart game</button>
         <button id="roll-toggle" type="button">🎲 roll</button>
+        <button id="end-turn-btn" type="button" disabled>End Turn</button>
       </div>
       <div id="hud-panel">
         <details>
@@ -384,12 +463,22 @@
             </select></label>
           </div>
         </details>
+        <details open>
+          <summary>Players</summary>
+          <div class="group" id="players-group">
+            <label><span class="lbl">count</span><select id="playerCount">
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4" selected>4</option>
+            </select></label>
+            <div id="player-slots"></div>
+            <label><span class="lbl">viewer</span><select id="viewerSelect"></select></label>
+            <button id="players-apply" type="button">Apply / Regen</button>
+          </div>
+        </details>
         <details>
           <summary>Buildings</summary>
           <div class="group">
-            <label><span class="lbl">hue</span><input id="buildingHue" type="range" min="0" max="359" step="1" value="0" /></label>
-            <label><span class="lbl">saturation</span><input id="buildingSat" type="range" min="0" max="100" step="1" value="70" /></label>
-            <label><span class="lbl">lightness</span><input id="buildingLight" type="range" min="0" max="100" step="1" value="50" /></label>
             <label><span class="lbl">tint blend</span><select id="buildingBlend">
               <option value="overlay">overlay</option>
               <option value="multiply">multiply</option>
@@ -507,7 +596,19 @@
       <div id="resource-hud" aria-label="resources"></div>
       <button id="trade-toggle" type="button" aria-label="bank trade">Trade</button>
     </div>
+    <div id="player-strip" aria-label="players"></div>
     <div id="resource-fx" aria-hidden="true"></div>
+    <div id="prematch-backdrop" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+      <div id="prematch-panel">
+        <h3>Roll for first turn — best of 3</h3>
+        <div id="prematch-rows"></div>
+        <div class="actions">
+          <button id="prematch-roll" class="primary" type="button">Roll</button>
+          <button id="prematch-tiebreak" type="button" style="display:none">Re-roll tied</button>
+          <button id="prematch-start" class="primary" type="button" style="display:none">Start Game</button>
+        </div>
+      </div>
+    </div>
     <div id="passives-panel" class="hidden" aria-label="trade passives"></div>
     <div id="trade-backdrop" class="hidden" role="dialog" aria-modal="true" aria-label="bank trade">
       <div id="trade-panel">

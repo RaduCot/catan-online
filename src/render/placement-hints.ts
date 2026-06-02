@@ -25,7 +25,12 @@ export function drawPlacementHints(
   settlementOffYK: number,
   now: number,
   phase: "marks" | "preview",
+  // Color shown to the active builder — currently informational; hint
+  // styling stays gold-on-cyan for legibility. Kept threaded so future
+  // passes can tint hints per-player.
+  _hintColor?: string,
 ) {
+  void _hintColor;
   if (hints.step === "free" && hints.vertices.size === 0 && hints.edges.size === 0 && hints.cities.size === 0) return;
   if (buildingScale <= 0) return;
   const s = layout.size;

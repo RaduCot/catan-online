@@ -10,6 +10,7 @@ import {
   BridgeVariant,
 } from "./buildings";
 import { canAfford } from "./resources";
+import { currentBuilderId } from "./turn";
 
 // --- Placement rules. Catan: settlements/cities at vertices (distance-2
 // apart), bridges (roads) at edges, must be connected to a friendly building
@@ -94,7 +95,8 @@ export function buildPlacementGraph(board: Board, layout: HexLayout): PlacementG
 }
 
 // Distance rule: a vertex is OK for settlement iff it itself is empty AND no
-// vertex one edge away holds a settlement/city.
+// vertex one edge away holds a settlement/city. Distance applies vs ALL
+// players (you can't settle adjacent to any opponent either).
 export function settlementDistanceOk(vk: string, graph: PlacementGraph): boolean {
   if (buildings.has(vk)) return false;
   for (const n of graph.vertexNeighbors.get(vk) ?? []) {
@@ -103,9 +105,12 @@ export function settlementDistanceOk(vk: string, graph: PlacementGraph): boolean
   return true;
 }
 
+// Connected by *friendly* (current builder's) bridge.
 export function vertexConnectedByBridge(vk: string, graph: PlacementGraph): boolean {
+  const me = currentBuilderId();
   for (const e of graph.vertexEdges.get(vk) ?? []) {
-    if (bridges.has(e)) return true;
+    const rec = bridges.get(e);
+    if (rec && rec.ownerId === me) return true;
   }
   return false;
 }
@@ -129,6 +134,7 @@ export function validSettlementVertices(graph: PlacementGraph): Set<string> {
 
 export function validBridgeEdges(graph: PlacementGraph): Set<string> {
   const out = new Set<string>();
+  const me = currentBuilderId();
   if (placementStep === "initial-b1" || placementStep === "initial-b2") {
     if (!lastInitialSettlementKey) return out;
     for (const e of graph.vertexEdges.get(lastInitialSettlementKey) ?? []) {
@@ -140,9 +146,12 @@ export function validBridgeEdges(graph: PlacementGraph): Set<string> {
       if (bridges.has(ek)) continue;
       let connected = false;
       for (const vk of [eData.ak, eData.bk]) {
-        if (buildings.has(vk)) { connected = true; break; }
+        const b = buildings.get(vk);
+        if (b && b.ownerId === me) { connected = true; break; }
         for (const other of graph.vertexEdges.get(vk) ?? []) {
-          if (other !== ek && bridges.has(other)) { connected = true; break; }
+          if (other === ek) continue;
+          const obr = bridges.get(other);
+          if (obr && obr.ownerId === me) { connected = true; break; }
         }
         if (connected) break;
       }
@@ -194,28 +203,32 @@ export function validCityVertices(): Set<string> {
   const out = new Set<string>();
   if (placementStep !== "free") return out;
   if (!canAfford("city")) return out;
-  for (const [vk, kind] of buildings) {
-    if (kind === "settlement") out.add(vk);
+  const me = currentBuilderId();
+  for (const [vk, rec] of buildings) {
+    if (rec.kind === "settlement" && rec.ownerId === me) out.add(vk);
   }
   return out;
 }
 
-// Vertex is "explored" if any friendly building sits on it OR any friendly
-// bridge has it as an endpoint. In fog mode, tiles become visible the moment
-// any of their 6 corners is explored.
-export function exploredVertexKeys(): Set<string> {
+// Vertex is "explored" if any of the player's buildings sit on it OR any of
+// their bridges has it as an endpoint. In fog mode, tiles become visible the
+// moment any of their 6 corners is explored.
+export function exploredVertexKeys(playerId: number): Set<string> {
   const set = new Set<string>();
-  for (const vk of buildings.keys()) set.add(vk);
+  for (const [vk, rec] of buildings) {
+    if (rec.ownerId === playerId) set.add(vk);
+  }
   for (const rec of bridges.values()) {
+    if (rec.ownerId !== playerId) continue;
     set.add(vertexKey(rec.a[0], rec.a[1]));
     set.add(vertexKey(rec.b[0], rec.b[1]));
   }
   return set;
 }
 
-export function exploredTileIndices(board: Board, layout: HexLayout): Set<number> {
+export function exploredTileIndices(playerId: number, board: Board, layout: HexLayout): Set<number> {
   const out = new Set<number>();
-  const explored = exploredVertexKeys();
+  const explored = exploredVertexKeys(playerId);
   const s = layout.size;
   for (let i = 0; i < board.tiles.length; i++) {
     const { x, y } = axialToPixel(board.tiles[i], layout);

@@ -50,7 +50,7 @@ export function draw(
     bridgeTuning: Record<BridgeVariant, BridgeTuning>;
     pathWidth: number;
     pathBlend: GlobalCompositeOperation;
-    color: string;
+    getOwnerColor: (ownerId: number) => string;
     blend: GlobalCompositeOperation;
     shadowBlend: GlobalCompositeOperation;
     shadowAngleDeg: number;
@@ -69,7 +69,8 @@ export function draw(
     graph: PlacementGraph;
     hints: PlacementHintState;
     buildingImgs: BuildingImgs;
-    color: string;
+    // Hint tint for the current builder (active player or opening pointer).
+    hintColor: string;
     blend: GlobalCompositeOperation;
     bridgeTuning: Record<BridgeVariant, BridgeTuning>;
     buildingScale: number;
@@ -221,6 +222,7 @@ export function draw(
       placementOpts.settlementOffY,
       now,
       "marks",
+      placementOpts.hintColor,
     );
   }
   drawPlacements(ctx, buildingImgs, layout, { ...buildingOpts, now });
@@ -237,6 +239,7 @@ export function draw(
       placementOpts.settlementOffY,
       now,
       "preview",
+      placementOpts.hintColor,
     );
   }
   drawHoverIcon(ctx, board, layout, portIcons, hoverOpts);

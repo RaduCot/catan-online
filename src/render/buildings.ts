@@ -93,7 +93,9 @@ export function drawPlacements(
     settlementOffY: number;
     cityScale: number;
     cityOffY: number;
-    color: string;
+    // Per-owner color resolver. Used to tint each piece and stroke each
+    // bridge path with the placing player's color.
+    getOwnerColor: (ownerId: number) => string;
     blend: GlobalCompositeOperation;
     bridgeTuning: Record<BridgeVariant, BridgeTuning>;
     pathWidth: number;
@@ -122,27 +124,35 @@ export function drawPlacements(
   if (bridges.size && opts.pathWidth > 0) {
     ctx.save();
     ctx.globalCompositeOperation = opts.pathBlend;
-    ctx.strokeStyle = opts.color;
     ctx.lineCap = "round";
     ctx.lineWidth = s * opts.pathWidth;
-    const incident = new Map<string, number>();
+    // "Open" check is owner-scoped: a bridge endpoint counts as connected
+    // only by the owner's own buildings / bridges, otherwise the dangling
+    // tip clips to the midpoint.
+    const incident = new Map<string, Map<number, number>>();
+    const bump = (k: string, owner: number) => {
+      let m = incident.get(k);
+      if (!m) { m = new Map(); incident.set(k, m); }
+      m.set(owner, (m.get(owner) ?? 0) + 1);
+    };
     for (const rec of bridges.values()) {
-      const ka = vertexKey(rec.a[0], rec.a[1]);
-      const kb = vertexKey(rec.b[0], rec.b[1]);
-      incident.set(ka, (incident.get(ka) ?? 0) + 1);
-      incident.set(kb, (incident.get(kb) ?? 0) + 1);
+      bump(vertexKey(rec.a[0], rec.a[1]), rec.ownerId);
+      bump(vertexKey(rec.b[0], rec.b[1]), rec.ownerId);
     }
     for (const rec of bridges.values()) {
       const ka = vertexKey(rec.a[0], rec.a[1]);
       const kb = vertexKey(rec.b[0], rec.b[1]);
-      const aOpen = !buildings.has(ka) && (incident.get(ka) ?? 0) <= 1;
-      const bOpen = !buildings.has(kb) && (incident.get(kb) ?? 0) <= 1;
+      const aBld = buildings.get(ka);
+      const bBld = buildings.get(kb);
+      const aOpen = !(aBld && aBld.ownerId === rec.ownerId) && (incident.get(ka)?.get(rec.ownerId) ?? 0) <= 1;
+      const bOpen = !(bBld && bBld.ownerId === rec.ownerId) && (incident.get(kb)?.get(rec.ownerId) ?? 0) <= 1;
       const mx = (rec.a[0] + rec.b[0]) / 2;
       const my = (rec.a[1] + rec.b[1]) / 2;
       const sx = aOpen ? mx : rec.a[0];
       const sy = aOpen ? my : rec.a[1];
       const ex = bOpen ? mx : rec.b[0];
       const ey = bOpen ? my : rec.b[1];
+      ctx.strokeStyle = opts.getOwnerColor(rec.ownerId);
       ctx.beginPath();
       ctx.moveTo(sx, sy);
       ctx.lineTo(ex, ey);
@@ -161,16 +171,17 @@ export function drawPlacements(
   const items: Placement[] = [];
 
   if (buildings.size) {
-    const settlementSprite = tintedBuilding("settlement", imgs.settlement, imgs.settlementMask, opts.color, opts.blend);
-    const citySprite = tintedBuilding("city", imgs.city, imgs.cityMask, opts.color, opts.blend);
-    for (const [v, kind] of buildings) {
+    for (const [v, rec] of buildings) {
       const [xPart, yPart] = v.split("|").map(Number);
       const wx = xPart / 4, wy = yPart / 4;
-      const sprite = kind === "city" ? citySprite : settlementSprite;
+      const color = opts.getOwnerColor(rec.ownerId);
+      const sprite = rec.kind === "city"
+        ? tintedBuilding("city", imgs.city, imgs.cityMask, color, opts.blend)
+        : tintedBuilding("settlement", imgs.settlement, imgs.settlementMask, color, opts.blend);
       const bounce = placementBounceScale(v, opts.now);
-      const size = s * (kind === "city" ? opts.cityScale : opts.settlementScale) * opts.buildingScale * bounce;
+      const size = s * (rec.kind === "city" ? opts.cityScale : opts.settlementScale) * opts.buildingScale * bounce;
       if (size <= 0) continue;
-      const offY = (kind === "city" ? opts.cityOffY : opts.settlementOffY) * s;
+      const offY = (rec.kind === "city" ? opts.cityOffY : opts.settlementOffY) * s;
       items.push({
         sortY: wy + offY + size * 0.5,
         sprite,
@@ -183,15 +194,15 @@ export function drawPlacements(
   }
 
   if (bridges.size) {
-    const bridgeSprites: Record<BridgeVariant, HTMLCanvasElement | null> = {
-      "30up": tintedBuilding("bridge30up", imgs.bridge30up, imgs.bridge30upMask, opts.color, opts.blend),
-      "30down": tintedBuilding("bridge30down", imgs.bridge30down, imgs.bridge30downMask, opts.color, opts.blend),
-      straight: imgs.bridgeStraight && imgs.bridgeStraightMask
-        ? tintedBuilding("bridgeStraight", imgs.bridgeStraight, imgs.bridgeStraightMask, opts.color, opts.blend)
-        : null,
-    };
     for (const [k, rec] of bridges) {
-      const sprite = bridgeSprites[rec.variant];
+      const color = opts.getOwnerColor(rec.ownerId);
+      const sprite: HTMLCanvasElement | null = rec.variant === "30up"
+        ? tintedBuilding("bridge30up", imgs.bridge30up, imgs.bridge30upMask, color, opts.blend)
+        : rec.variant === "30down"
+        ? tintedBuilding("bridge30down", imgs.bridge30down, imgs.bridge30downMask, color, opts.blend)
+        : imgs.bridgeStraight && imgs.bridgeStraightMask
+        ? tintedBuilding("bridgeStraight", imgs.bridgeStraight, imgs.bridgeStraightMask, color, opts.blend)
+        : null;
       if (!sprite) continue;
       const parts = k.slice(2).split("|").map(Number);
       const wx = parts[0] / 4, wy = parts[1] / 4;

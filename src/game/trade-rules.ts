@@ -56,15 +56,21 @@ function shuffleInPlace<T>(arr: T[]): T[] {
   return arr;
 }
 
-// Reshuffle the board's number tokens so that exactly one of the two opening
-// settlements has a single 6/8 neighbour and the other has none. Preserves the
-// existing number-pool composition (same multiset of numbers, deserts stay
-// numberless). No-op if the rule is off, fewer than two settlements exist, the
-// pool has no 6/8s, or no exclusive non-desert neighbour is available.
-export function reshuffleFor68Rule(board: Board, layout: HexLayout) {
+// Reshuffle the board's number tokens so that exactly one of player 0's two
+// opening settlements has a single 6/8 neighbour and the other has none.
+// Preserves the existing number-pool composition (same multiset of numbers,
+// deserts stay numberless). No-op if the rule is off, fewer than two
+// settlements exist, the pool has no 6/8s, or no exclusive non-desert
+// neighbour is available.
+//
+// TODO(multiplayer-6/8): currently only enforces for player 0 (whoever
+// placed first in turn order). Per-player guarantees for 3+ players
+// require simultaneous constraint satisfaction across overlapping
+// neighbours and aren't worth the complexity for this scaffolding pass.
+export function reshuffleFor68Rule(board: Board, layout: HexLayout, playerId: number = 0) {
   if (!ruleGuaranteed68) return;
   const settlementVKs = [...buildings.entries()]
-    .filter(([, k]) => k === "settlement")
+    .filter(([, rec]) => rec.kind === "settlement" && rec.ownerId === playerId)
     .map(([v]) => v);
   if (settlementVKs.length !== 2) return;
 
@@ -148,12 +154,16 @@ export function tradeRateFor(resource: ResourceKind, ports: Set<PortType>): 2 | 
   return 4;
 }
 
-// A port is "owned" (its trade ratio active) when the player has a settlement
-// or city on either of its two dock corners — the corners of the ocean tile's
-// edge that touches the adjacent land tile.
-export function ownedPortTypes(board: Board, layout: HexLayout): Set<PortType> {
+// A port is "owned" (its trade ratio active) when the given player has a
+// settlement or city on either of its two dock corners — the corners of the
+// ocean tile's edge that touches the adjacent land tile.
+export function ownedPortTypes(playerId: number, board: Board, layout: HexLayout): Set<PortType> {
   const out = new Set<PortType>();
   const s = layout.size;
+  const ownedAt = (k: string) => {
+    const rec = buildings.get(k);
+    return !!rec && rec.ownerId === playerId;
+  };
   for (const ocean of board.oceans) {
     if (!ocean.port) continue;
     const { x, y } = axialToPixel(ocean, layout);
@@ -163,7 +173,7 @@ export function ownedPortTypes(board: Board, layout: HexLayout): Set<PortType> {
     const ei = (6 - ocean.port.facing) % 6;
     const [ax, ay] = hexCorner(x, y, s, ei);
     const [bx, by] = hexCorner(x, y, s, (ei + 1) % 6);
-    if (buildings.has(vertexKey(ax, ay)) || buildings.has(vertexKey(bx, by))) {
+    if (ownedAt(vertexKey(ax, ay)) || ownedAt(vertexKey(bx, by))) {
       out.add(ocean.port.type);
     }
   }
