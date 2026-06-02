@@ -261,8 +261,10 @@ export function buildVertexAdjacency(board: Board, layout: HexLayout): Map<strin
 
 // Pieces (buildings + bridges) the viewer can see under fog-of-war: their own
 // pieces, plus opponents' pieces sitting on tiles the viewer has explored.
-// A bridge counts as visible if *either* of its endpoint vertices touches an
-// explored tile — half-seen roads are still roads.
+// A building is visible if any of its 3 corner-tiles is explored. A bridge
+// is visible only if one of the two tiles its edge actually sits between is
+// explored — checking endpoint vertices would over-reveal, since a vertex is
+// shared by up to 3 tiles, including tiles the bridge doesn't touch.
 export function visiblePiecesForViewer(
   viewerId: number,
   board: Board,
@@ -270,22 +272,28 @@ export function visiblePiecesForViewer(
 ): { buildings: Set<string>; bridges: Set<string> } {
   const exploredTiles = exploredTileIndices(viewerId, board, layout);
   const adj = buildVertexAdjacency(board, layout);
-  const vertexExposed = (vk: string): boolean => {
-    const tiles = adj.get(vk);
+  const anyExplored = (tiles: Set<number> | undefined): boolean => {
     if (!tiles) return false;
     for (const t of tiles) if (exploredTiles.has(t)) return true;
     return false;
   };
   const visBuildings = new Set<string>();
   for (const [vk, rec] of buildings) {
-    if (rec.ownerId === viewerId || vertexExposed(vk)) visBuildings.add(vk);
+    if (rec.ownerId === viewerId || anyExplored(adj.get(vk))) visBuildings.add(vk);
   }
   const visBridges = new Set<string>();
   for (const [ek, rec] of bridges) {
     if (rec.ownerId === viewerId) { visBridges.add(ek); continue; }
-    const aK = vertexKey(rec.a[0], rec.a[1]);
-    const bK = vertexKey(rec.b[0], rec.b[1]);
-    if (vertexExposed(aK) || vertexExposed(bK)) visBridges.add(ek);
+    // Tiles the edge sits between = intersection of its two endpoint
+    // vertices' adjacent-tile sets (2 tiles inland, 1 on the coast).
+    const aTiles = adj.get(vertexKey(rec.a[0], rec.a[1]));
+    const bTiles = adj.get(vertexKey(rec.b[0], rec.b[1]));
+    if (!aTiles || !bTiles) continue;
+    let seen = false;
+    for (const t of aTiles) {
+      if (bTiles.has(t) && exploredTiles.has(t)) { seen = true; break; }
+    }
+    if (seen) visBridges.add(ek);
   }
   return { buildings: visBuildings, bridges: visBridges };
 }
