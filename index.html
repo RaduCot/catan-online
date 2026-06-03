@@ -14,14 +14,16 @@
       /* =====================================================================
        * Catan Online — chrome design contract
        * =====================================================================
-       * Two-palette system. Keep them apart on purpose.
+       * Two-palette system. Both are dark; they're distinguished by
+       * temperature, not lightness.
        *
-       *  GAMEPLAY (cream + warm shadows): everything the player touches during
-       *  a match — HUD cards, modals, player strip, action buttons, resource
-       *  HUD, trade picker, pre-match. Reads as "tabletop felt": rounded,
-       *  bouncy, generously padded, bold display numerals.
+       *  GAMEPLAY (dark warm "leather" with brass accents): everything the
+       *  player touches during a match — HUD cards, modals, player strip,
+       *  action buttons, resource HUD, trade picker, pre-match. Reads as
+       *  "tabletop in lamplight": warm cream type on near-black browns,
+       *  bouncy micro-interactions, bold display numerals.
        *
-       *  DEV / DEBUG (slate, muted): the rendering-knob drawer. Tight,
+       *  DEV / DEBUG (cool slate, muted): the rendering-knob drawer. Tight,
        *  small-font, low-contrast slate. Looks like a tool — never competes
        *  with gameplay for attention. No bounce on dev surfaces.
        *
@@ -53,27 +55,30 @@
        */
 
       :root {
-        /* Surfaces */
-        --bg-deep: #0c1f33;
-        --surface-1: #f6ecd2;
-        --surface-2: #ecdfba;
-        --surface-3: #fff7e3;
-        --surface-ink: #2a1b0e;
-        --surface-ink-soft: #6b513a;
-        --surface-line: rgba(80, 50, 20, 0.12);
+        /* Surfaces — dark warm "leather/wood" palette. Gameplay reads as
+         * dim tabletop in lamplight: warm cream text on near-black browns,
+         * brass accents. Distinct from dev (cool slate) by temperature. */
+        --bg-deep: #0a1622;
+        --surface-1: #1f1812;
+        --surface-2: #15100b;
+        --surface-3: #2b1f15;
+        --surface-ink: #f0e2c0;
+        --surface-ink-soft: #a89373;
+        --surface-line: rgba(255, 220, 160, 0.10);
 
         /* Accents */
         --accent-gold: #f4c757;
         --accent-gold-dim: #c89a3a;
         --accent-terracotta: #d96a4a;
-        --accent-forest: #3e8a5b;
-        --accent-ocean: #3f7aa8;
+        --accent-forest: #4fa872;
+        --accent-ocean: #5b9ecf;
 
-        /* Dev / debug */
-        --dev-bg: #1a2738;
-        --dev-surface: #243549;
-        --dev-ink: #b8c5d4;
-        --dev-ink-soft: #7d8da0;
+        /* Dev / debug — cooler slate so the warm-vs-cool distinction
+         * between gameplay surfaces and tooling survives the dark flip. */
+        --dev-bg: #11192a;
+        --dev-surface: #1c2a3e;
+        --dev-ink: #c5d2e1;
+        --dev-ink-soft: #8696ad;
         --dev-line: rgba(255, 255, 255, 0.06);
         --dev-accent: #5c7a99;
 
@@ -81,18 +86,20 @@
         --font-display: "Nunito", "Quicksand", system-ui, -apple-system, sans-serif;
         --font-ui: system-ui, -apple-system, sans-serif;
 
-        /* Geometry */
-        --r-card: 18px;
+        /* Geometry — less rounded than the first pass. Pills stay pill;
+         * cards/buttons are grounded rounded rectangles. */
+        --r-card: 12px;
         --r-pill: 999px;
-        --r-input: 10px;
+        --r-input: 8px;
         --pad-card: 16px;
         --pad-tight: 8px;
 
-        /* Shadows */
-        --shadow-card: 0 8px 24px rgba(60, 40, 20, 0.18), 0 2px 6px rgba(60, 40, 20, 0.10);
-        --shadow-lift: 0 12px 32px rgba(60, 40, 20, 0.28);
-        --shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.6), inset 0 -2px 0 rgba(80, 50, 20, 0.08);
-        --shadow-dev: 0 4px 12px rgba(0, 0, 0, 0.3);
+        /* Shadows — darker drops to read on dark warm surfaces; insets
+         * use a faint warm rim + a dark bottom edge for press depth. */
+        --shadow-card: 0 8px 24px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.30);
+        --shadow-lift: 0 14px 36px rgba(0, 0, 0, 0.55);
+        --shadow-inset: inset 0 1px 0 rgba(255, 220, 180, 0.10), inset 0 -2px 0 rgba(0, 0, 0, 0.35);
+        --shadow-dev: 0 4px 12px rgba(0, 0, 0, 0.4);
 
         /* Motion */
         --ease-bounce: cubic-bezier(.34, 1.56, .64, 1);
@@ -158,13 +165,43 @@
         white-space: nowrap;
       }
 
-      /* gameplay action buttons */
+      /* Guided experience — a centred banner that pops in on phase / turn
+       * transitions ("Match started!", "P2 — roll the dice!"). Auto-fades
+       * after a few seconds; replaced immediately on the next transition. */
+      #action-prompt {
+        position: fixed; top: 18px; left: 50%;
+        transform: translate(-50%, -10px) scale(0.94);
+        z-index: 60;
+        background: linear-gradient(180deg, var(--accent-gold) 0%, var(--accent-gold-dim) 100%);
+        color: #2a1b0e;
+        font-family: var(--font-display);
+        font-weight: 900;
+        font-size: 18px;
+        letter-spacing: 0.02em;
+        padding: 12px 24px;
+        border-radius: var(--r-card);
+        box-shadow: var(--shadow-lift), var(--shadow-inset);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.25s var(--ease-soft),
+                    transform 0.45s var(--ease-bounce);
+        white-space: nowrap;
+        max-width: 90vw;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      #action-prompt.visible {
+        opacity: 1;
+        transform: translate(-50%, 0) scale(1);
+      }
+
+      /* gameplay action buttons — rounded rectangles (grounded, not pill) */
       .gp-btn {
         font-family: var(--font-display);
         font-weight: 800;
         font-size: 13px;
         padding: 9px 16px;
-        border-radius: var(--r-pill);
+        border-radius: var(--r-card);
         background: var(--surface-1);
         color: var(--surface-ink);
         box-shadow: var(--shadow-card), var(--shadow-inset);
@@ -862,9 +899,9 @@
           <div class="group" id="players-group">
             <label><span class="lbl">count</span><select id="playerCount">
               <option value="1">1</option>
-              <option value="2">2</option>
+              <option value="2" selected>2</option>
               <option value="3">3</option>
-              <option value="4" selected>4</option>
+              <option value="4">4</option>
             </select></label>
             <div id="player-slots"></div>
             <label><span class="lbl">viewer</span><select id="viewerSelect"></select></label>
@@ -897,6 +934,9 @@
 
     <div id="resource-fx" aria-hidden="true"></div>
 
+    <!-- ===== GAMEPLAY: guided action prompt ===== -->
+    <div id="action-prompt" aria-live="polite"></div>
+
     <!-- ===== GAMEPLAY: pre-match modal ===== -->
     <div id="prematch-backdrop" class="modal-backdrop hidden" role="dialog" aria-modal="true">
       <div id="prematch-panel">
@@ -905,8 +945,6 @@
         <div id="prematch-rows"></div>
         <div class="actions">
           <button id="prematch-roll" class="primary" type="button">Roll</button>
-          <button id="prematch-tiebreak" type="button" style="display:none">Re-roll tied</button>
-          <button id="prematch-start" class="primary" type="button" style="display:none">Start Game</button>
         </div>
       </div>
     </div>

@@ -96,8 +96,6 @@ import {
   recordRoll,
   isComplete as preMatchComplete,
   resolveTurnOrder,
-  tiedTopIds,
-  startTiebreak,
   getCurrentRollerId,
   getRolls,
   getSums,
@@ -197,8 +195,7 @@ async function main() {
   const prematchBackdrop = document.getElementById("prematch-backdrop") as HTMLDivElement;
   const prematchRows = document.getElementById("prematch-rows") as HTMLDivElement;
   const prematchRollBtn = document.getElementById("prematch-roll") as HTMLButtonElement;
-  const prematchTiebreakBtn = document.getElementById("prematch-tiebreak") as HTMLButtonElement;
-  const prematchStartBtn = document.getElementById("prematch-start") as HTMLButtonElement;
+  const actionPromptEl = document.getElementById("action-prompt") as HTMLDivElement | null;
 
   const images = await loadImages();
   const portIcons = await loadPortIcons();
@@ -209,7 +206,7 @@ async function main() {
   const slotNames: string[] = DEFAULT_NAMES.slice();
   const slotColors: string[] = DEFAULT_COLORS.slice();
   function renderPlayerSlots() {
-    const n = Number(playerCountSelect.value) || 4;
+    const n = Number(playerCountSelect.value) || 2;
     playerSlotsDiv.innerHTML = "";
     for (let i = 0; i < n; i++) {
       const row = document.createElement("label");
@@ -239,7 +236,7 @@ async function main() {
   playerCountSelect.addEventListener("change", renderPlayerSlots);
 
   // Default 4 players at startup so resources/reveal indexing has slots.
-  initPlayers(4, slotColors, slotNames);
+  initPlayers(2, slotColors, slotNames);
 
   let board = generateBoard(
     Number(seedInput.value) || 0,
@@ -1177,6 +1174,30 @@ async function main() {
     }
   };
 
+  // Guided action prompt — a centered banner that announces phase/turn
+  // transitions ("Match started!", "P2 — roll the dice!"). Auto-fades after
+  // a few seconds or until the next transition replaces it.
+  let promptHideTimer: number | null = null;
+  function showActionPrompt(text: string, holdMs: number = 2800) {
+    if (!actionPromptEl) return;
+    actionPromptEl.textContent = text;
+    // Restart the pop-in transition even when text changes back-to-back.
+    actionPromptEl.classList.remove("visible");
+    // Force reflow so the class removal+re-add re-triggers the transition.
+    void actionPromptEl.offsetWidth;
+    actionPromptEl.classList.add("visible");
+    if (promptHideTimer != null) clearTimeout(promptHideTimer);
+    promptHideTimer = window.setTimeout(() => {
+      actionPromptEl.classList.remove("visible");
+    }, holdMs);
+  }
+
+  // Track previous phase/step/active so refreshTopButtons can fire the right
+  // prompt only on actual transitions.
+  let prevPhase: ReturnType<typeof getPhase> | null = null;
+  let prevStep: ReturnType<typeof getPlacementStep> | null = null;
+  let prevActiveId: number = -1;
+
   refreshTopButtons = () => {
     const phase = getPhase();
     rollBtn.disabled = phase !== "roll";
@@ -1186,26 +1207,45 @@ async function main() {
     // running, hide it so the player can't kick off a duplicate pre-match.
     startMatchBtn.style.display = phase === "pre-match" ? "" : "none";
     // Match status pill: derive a human-readable phase + active player label.
-    if (matchStatusEl) {
-      const players = getPlayers();
-      const activeId = getActivePlayerId();
-      const active = players.find((p) => p.id === activeId);
-      const tag = active ? active.name : `P${activeId + 1}`;
-      let text = "Sandbox";
-      if (phase === "pre-match") {
-        text = "Pre-match";
-      } else if (phase === "opening") {
-        const step = getPlacementStep();
-        if (step === "initial-s1" || step === "initial-s2") text = `${tag} placing — settlement`;
-        else if (step === "initial-b1" || step === "initial-b2") text = `${tag} placing — road`;
-        else text = `${tag} placing`;
-      } else if (phase === "roll") {
-        text = `${tag} to roll`;
-      } else if (phase === "main") {
-        text = `${tag} — main`;
-      }
-      matchStatusEl.textContent = text;
+    const players = getPlayers();
+    const activeId = phase === "opening" ? currentBuilderId() : getActivePlayerId();
+    const active = players.find((p) => p.id === activeId);
+    const tag = active ? active.name : `P${activeId + 1}`;
+    const step = getPlacementStep();
+    let statusText = "Sandbox";
+    if (phase === "pre-match") {
+      statusText = "Pre-match";
+    } else if (phase === "opening") {
+      if (step === "initial-s1" || step === "initial-s2") statusText = `${tag} placing — settlement`;
+      else if (step === "initial-b1" || step === "initial-b2") statusText = `${tag} placing — road`;
+      else statusText = `${tag} placing`;
+    } else if (phase === "roll") {
+      statusText = `${tag} to roll`;
+    } else if (phase === "main") {
+      statusText = `${tag} — main`;
     }
+    if (matchStatusEl) matchStatusEl.textContent = statusText;
+
+    // Guided prompts on transitions. The phase change is the strongest cue;
+    // step/active changes layer on top during opening.
+    const phaseChanged = phase !== prevPhase;
+    const stepChanged = step !== prevStep;
+    const activeChanged = activeId !== prevActiveId;
+    if (phaseChanged && phase === "opening" && prevPhase === "pre-match") {
+      showActionPrompt(`Match started! ${tag} — place your settlement`, 3400);
+    } else if (phaseChanged && phase === "roll") {
+      showActionPrompt(`${tag} — roll the dice!`);
+    } else if (phaseChanged && phase === "main") {
+      showActionPrompt(`${tag} — trade or build`);
+    } else if (phase === "opening" && (activeChanged || stepChanged)) {
+      if (step === "initial-s1") showActionPrompt(`${tag} — place your first settlement`);
+      else if (step === "initial-b1") showActionPrompt(`${tag} — place your first road`);
+      else if (step === "initial-s2") showActionPrompt(`${tag} — place your second settlement`);
+      else if (step === "initial-b2") showActionPrompt(`${tag} — place your second road`);
+    }
+    prevPhase = phase;
+    prevStep = step;
+    prevActiveId = activeId;
   };
 
   startMatchBtn.addEventListener("click", () => {
@@ -1240,22 +1280,9 @@ async function main() {
       row.appendChild(sumEl);
       prematchRows.appendChild(row);
     }
-    if (preMatchComplete()) {
-      const order = resolveTurnOrder();
-      if (order == null) {
-        prematchRollBtn.style.display = "none";
-        prematchTiebreakBtn.style.display = "";
-        prematchStartBtn.style.display = "none";
-      } else {
-        prematchRollBtn.style.display = "none";
-        prematchTiebreakBtn.style.display = "none";
-        prematchStartBtn.style.display = "";
-      }
-    } else {
-      prematchRollBtn.style.display = "";
-      prematchTiebreakBtn.style.display = "none";
-      prematchStartBtn.style.display = "none";
-    }
+    // The roll button hides once the modal has captured all rolls. The match
+    // auto-starts from inside the roll handler, so no Start / Tiebreak UI.
+    prematchRollBtn.style.display = preMatchComplete() ? "none" : "";
   }
   function openPreMatchModal() {
     // 1-player mode skips pre-match — no point rolling against yourself.
@@ -1278,38 +1305,47 @@ async function main() {
   function closePreMatchModal() {
     prematchBackdrop.classList.add("hidden");
   }
-  prematchRollBtn.addEventListener("click", () => {
-    // Roll 2d6 via the existing dice overlay; record the sum into pre-match.
-    rollDice(board);
-    const sum = dice.dice[0] + dice.dice[1];
+  // Pre-match roll: trigger the dice overlay animation for suspense, then
+  // record the result once it settles. The roll button stays disabled during
+  // the animation so the same player can't double-click through.
+  // Auto-starts the match (no confirm step) when every player's 3 rolls land.
+  const DICE_OUTCOME_MS = (0.9 + 0.5) * 1000 + 80; // roll + settle + tiny buffer
+  function commitPreMatchRoll(sum: number) {
     recordRoll(sum);
     renderPreMatchRows();
     render();
-  });
-  prematchTiebreakBtn.addEventListener("click", () => {
-    startTiebreak(tiedTopIds());
-    renderPreMatchRows();
-  });
-  prematchStartBtn.addEventListener("click", () => {
-    const order = resolveTurnOrder();
-    if (!order) return;
-    setTurnOrder(order);
-    setPhase("opening");
-    // First builder is turnOrder[0]; sync the viewer perspective to them so
-    // the placing player sees their hints by default.
-    setViewerPlayerId(order[0]);
-    viewerSelect.value = String(order[0]);
-    renderResourceHud(order[0]);
-    closePreMatchModal();
-    refreshPlayerStrip();
-    refreshTopButtons();
-    refreshPassivesAndTrade();
+    if (preMatchComplete()) {
+      // Brief pause so the player sees the final sum before the modal closes.
+      setTimeout(() => {
+        const order = resolveTurnOrder();
+        setTurnOrder(order);
+        setPhase("opening");
+        setViewerPlayerId(order[0]);
+        viewerSelect.value = String(order[0]);
+        renderResourceHud(order[0]);
+        closePreMatchModal();
+        refreshPlayerStrip();
+        refreshTopButtons();
+        refreshPassivesAndTrade();
+        render();
+      }, 600);
+    }
+  }
+  prematchRollBtn.addEventListener("click", () => {
+    if (prematchRollBtn.disabled) return;
+    prematchRollBtn.disabled = true;
+    rollDice(board);
+    const sum = dice.dice[0] + dice.dice[1];
     render();
+    setTimeout(() => {
+      prematchRollBtn.disabled = false;
+      commitPreMatchRoll(sum);
+    }, DICE_OUTCOME_MS);
   });
 
   // --- Players section apply ---
   playersApplyBtn.addEventListener("click", () => {
-    const n = Number(playerCountSelect.value) || 4;
+    const n = Number(playerCountSelect.value) || 2;
     initPlayers(n, slotColors, slotNames);
     rebuildViewerSelect();
     regen();

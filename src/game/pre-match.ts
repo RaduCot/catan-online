@@ -60,12 +60,10 @@ export function getSums(): { id: number; sum: number }[] {
   return Array.from({ length: playerCount }, (_, i) => ({ id: i, sum: sumOf(i) }));
 }
 
-// Returns ids sorted descending by sum, or null if the top players are tied.
-export function resolveTurnOrder(): number[] | null {
-  const sums = getSums().sort((a, b) => b.sum - a.sum);
-  const top = sums[0].sum;
-  const tiedAtTop = sums.filter((s) => s.sum === top);
-  if (tiedAtTop.length > 1) return null;
+// Returns ids sorted descending by sum, with lower player id breaking ties.
+// Deterministic so the modal can auto-start the match without prompting.
+export function resolveTurnOrder(): number[] {
+  const sums = getSums().sort((a, b) => b.sum - a.sum || a.id - b.id);
   return sums.map((s) => s.id);
 }
 
