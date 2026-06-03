@@ -426,6 +426,18 @@
       }
       .modal-backdrop.hidden,
       #trade-backdrop.hidden { display: none; }
+      /* While a pre-match dice roll is in flight, hide the rolls-count panel
+       * so the dice overlay has a clean stage. Backdrop stays so the canvas
+       * is still dimmed; dice render on #dice-overlay above everything. */
+      #prematch-backdrop.rolling #prematch-panel {
+        opacity: 0;
+        transform: scale(0.96);
+        pointer-events: none;
+        transition: opacity 0.25s var(--ease-soft), transform 0.25s var(--ease-soft);
+      }
+      #prematch-backdrop:not(.rolling) #prematch-panel {
+        transition: opacity 0.3s var(--ease-soft), transform 0.35s var(--ease-bounce);
+      }
       @keyframes backdrop-fade {
         from { opacity: 0; }
         to { opacity: 1; }

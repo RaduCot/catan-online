@@ -1348,11 +1348,16 @@ async function main() {
   prematchRollBtn.addEventListener("click", () => {
     if (prematchRollBtn.disabled) return;
     prematchRollBtn.disabled = true;
+    // Hide the rolls-count panel while the dice are airborne — the overlay
+    // canvas keeps the dice on top regardless, but the panel would clutter
+    // the stage during the animation.
+    prematchBackdrop.classList.add("rolling");
     rollDice(board);
     const sum = dice.dice[0] + dice.dice[1];
     render();
     setTimeout(() => {
       prematchRollBtn.disabled = false;
+      prematchBackdrop.classList.remove("rolling");
       commitPreMatchRoll(sum);
     }, DICE_OUTCOME_MS);
   });
