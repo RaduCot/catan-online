@@ -287,16 +287,17 @@
       #hud-panel input[type="number"],
       #hud-panel input[type="text"],
       #hud-panel select {
-        width: 130px; padding: 5px 8px;
-        background: #fff;
+        width: 130px; padding: 6px 10px;
+        background: var(--surface-2);
         border: 1px solid var(--surface-line);
         border-radius: var(--r-input);
         color: var(--surface-ink);
       }
+      #hud-panel input::placeholder { color: var(--surface-ink-soft); }
       #hud-panel input[type="color"] {
         width: 36px; height: 26px; padding: 0;
         border: 1px solid var(--surface-line);
-        border-radius: 6px; background: #fff;
+        border-radius: 6px; background: var(--surface-2);
       }
       #hud-panel input[type="checkbox"] {
         width: 18px; height: 18px;
