@@ -141,6 +141,13 @@
 
       #app { position: fixed; inset: 0; }
       canvas { display: block; width: 100%; height: 100%; }
+      /* Dice overlay sits above every gameplay surface (modals at 30, action
+       * prompt at 60) so the roll animation is never visually obstructed. */
+      #dice-overlay {
+        position: fixed; inset: 0; z-index: 80;
+        pointer-events: none;
+        background: transparent;
+      }
 
       /* =====================================================================
        * GAMEPLAY — top action bar (status + actions)
@@ -419,18 +426,6 @@
       }
       .modal-backdrop.hidden,
       #trade-backdrop.hidden { display: none; }
-      /* During a pre-match dice roll the canvas-rendered dice overlay needs
-       * the spotlight — fade the modal panel out (keep backdrop dim so the
-       * canvas isn't fully exposed) until the dice settle. */
-      #prematch-backdrop.rolling #prematch-panel {
-        opacity: 0;
-        transform: scale(0.96);
-        pointer-events: none;
-        transition: opacity 0.25s var(--ease-soft), transform 0.25s var(--ease-soft);
-      }
-      #prematch-backdrop:not(.rolling) #prematch-panel {
-        transition: opacity 0.3s var(--ease-soft), transform 0.35s var(--ease-bounce);
-      }
       @keyframes backdrop-fade {
         from { opacity: 0; }
         to { opacity: 1; }
@@ -946,6 +941,10 @@
     </div>
 
     <div id="resource-fx" aria-hidden="true"></div>
+
+    <!-- Dice render onto this overlay canvas instead of the main game canvas
+         so the roll animation always sits on top of modals (pre-match etc.). -->
+    <canvas id="dice-overlay" aria-hidden="true"></canvas>
 
     <!-- ===== GAMEPLAY: guided action prompt ===== -->
     <div id="action-prompt" aria-live="polite"></div>

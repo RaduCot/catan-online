@@ -29,6 +29,7 @@ import {
   matchPopAnimationRunning,
   diceAnimationRunning,
 } from "./animation/dice";
+import { drawDice } from "./render/dice";
 import { tileSheen, tileSheenAnimationRunning } from "./animation/tile-sheen";
 import { placementBounce, placementBounceAnimationRunning } from "./animation/placement-bounce";
 import { axialToPixel } from "./hex";
@@ -252,10 +253,17 @@ async function main() {
   let refreshPlayerStrip: () => void = () => {};
   let refreshTopButtons: () => void = () => {};
 
+  // Dice are drawn to a dedicated overlay canvas so they always sit above
+  // modals (pre-match etc.). Same DPR scaling as the main canvas.
+  const diceOverlay = document.getElementById("dice-overlay") as HTMLCanvasElement;
+  const diceCtx = diceOverlay.getContext("2d")!;
+
   function resize() {
     dpr = window.devicePixelRatio || 1;
     canvas.width = Math.floor(window.innerWidth * dpr);
     canvas.height = Math.floor(window.innerHeight * dpr);
+    diceOverlay.width = canvas.width;
+    diceOverlay.height = canvas.height;
     render();
   }
 
@@ -409,6 +417,12 @@ async function main() {
       opacity: Math.min(1, Math.max(0, Number(fogOpacityInput.value) || 0)),
     };
     draw(ctx, board, layout, images, portIcons, buildingImgs, imgScale, view, dpr, numOpts, glowOpts, beachOpts, portOpts, buildingOpts, hoverOpts, vignetteOpts, cloudOpts, placementOpts, fogOpts, performance.now());
+    // Dice are rendered separately to the overlay canvas so they stay on top
+    // of modals. Clear every frame so the dice disappear cleanly when their
+    // fade-out completes.
+    diceCtx.setTransform(1, 0, 0, 1, 0, 0);
+    diceCtx.clearRect(0, 0, diceOverlay.width, diceOverlay.height);
+    drawDice(diceCtx, dpr, performance.now());
   }
 
   // Animation loop — drives cloud motion. Cheap to leave running.
@@ -1334,14 +1348,11 @@ async function main() {
   prematchRollBtn.addEventListener("click", () => {
     if (prematchRollBtn.disabled) return;
     prematchRollBtn.disabled = true;
-    // Fade the modal panel out so the canvas dice animation is unobscured.
-    prematchBackdrop.classList.add("rolling");
     rollDice(board);
     const sum = dice.dice[0] + dice.dice[1];
     render();
     setTimeout(() => {
       prematchRollBtn.disabled = false;
-      prematchBackdrop.classList.remove("rolling");
       commitPreMatchRoll(sum);
     }, DICE_OUTCOME_MS);
   });

@@ -15,7 +15,6 @@ import { drawPlacementHints, PlacementHintState } from "./placement-hints";
 import { drawHoverIcon, HoverOpts } from "./hover-icon";
 import { drawVignette, VignetteOpts } from "./vignette";
 import { drawClouds, ensureCloudTextures, CloudOpts } from "./clouds";
-import { drawDice } from "./dice";
 import { drawResourceFog, FogOpts } from "./fog";
 import { drawTileSheen } from "./tile-sheen";
 import { BridgeVariant } from "../game/buildings";
@@ -251,7 +250,4 @@ export function draw(
   // and zooming carry them along with the board.
   ensureCloudTextures(cloudOpts);
   drawClouds(ctx, cloudOpts);
-
-  // Dice overlay (screen space, on top of everything).
-  drawDice(ctx, dpr, now);
 }
