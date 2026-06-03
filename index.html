@@ -419,6 +419,18 @@
       }
       .modal-backdrop.hidden,
       #trade-backdrop.hidden { display: none; }
+      /* During a pre-match dice roll the canvas-rendered dice overlay needs
+       * the spotlight — fade the modal panel out (keep backdrop dim so the
+       * canvas isn't fully exposed) until the dice settle. */
+      #prematch-backdrop.rolling #prematch-panel {
+        opacity: 0;
+        transform: scale(0.96);
+        pointer-events: none;
+        transition: opacity 0.25s var(--ease-soft), transform 0.25s var(--ease-soft);
+      }
+      #prematch-backdrop:not(.rolling) #prematch-panel {
+        transition: opacity 0.3s var(--ease-soft), transform 0.35s var(--ease-bounce);
+      }
       @keyframes backdrop-fade {
         from { opacity: 0; }
         to { opacity: 1; }

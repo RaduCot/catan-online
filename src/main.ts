@@ -1334,11 +1334,14 @@ async function main() {
   prematchRollBtn.addEventListener("click", () => {
     if (prematchRollBtn.disabled) return;
     prematchRollBtn.disabled = true;
+    // Fade the modal panel out so the canvas dice animation is unobscured.
+    prematchBackdrop.classList.add("rolling");
     rollDice(board);
     const sum = dice.dice[0] + dice.dice[1];
     render();
     setTimeout(() => {
       prematchRollBtn.disabled = false;
+      prematchBackdrop.classList.remove("rolling");
       commitPreMatchRoll(sum);
     }, DICE_OUTCOME_MS);
   });
