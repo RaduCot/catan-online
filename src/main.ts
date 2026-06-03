@@ -1319,11 +1319,12 @@ async function main() {
   function closePreMatchModal() {
     prematchBackdrop.classList.add("hidden");
   }
-  // Pre-match roll: trigger the dice overlay animation for suspense, then
-  // record the result once it settles. The roll button stays disabled during
-  // the animation so the same player can't double-click through.
-  // Auto-starts the match (no confirm step) when every player's 3 rolls land.
-  const DICE_OUTCOME_MS = (0.9 + 0.5) * 1000 + 80; // roll + settle + tiny buffer
+  // Pre-match roll: sequenced animation chain so nothing overlaps —
+  //   (1) fade rolls panel out → (2) dice roll+settle+fade out →
+  //   (3) panel fades back in → (4) re-enable button (or auto-start match)
+  // Each stage waits for the previous one to fully complete.
+  const PANEL_FADE_MS = 260;  // matches the CSS .rolling transition
+  const DICE_LIFE_MS = (0.9 + 0.5 + 1.0) * 1000; // roll + settle + fade
   function commitPreMatchRoll(sum: number) {
     recordRoll(sum);
     renderPreMatchRows();
@@ -1348,18 +1349,21 @@ async function main() {
   prematchRollBtn.addEventListener("click", () => {
     if (prematchRollBtn.disabled) return;
     prematchRollBtn.disabled = true;
-    // Hide the rolls-count panel while the dice are airborne — the overlay
-    // canvas keeps the dice on top regardless, but the panel would clutter
-    // the stage during the animation.
+    // Stage 1: fade the rolls panel out completely.
     prematchBackdrop.classList.add("rolling");
-    rollDice(board);
-    const sum = dice.dice[0] + dice.dice[1];
-    render();
     setTimeout(() => {
-      prematchRollBtn.disabled = false;
-      prematchBackdrop.classList.remove("rolling");
-      commitPreMatchRoll(sum);
-    }, DICE_OUTCOME_MS);
+      // Stage 2: panel is gone — start the dice animation.
+      rollDice(board);
+      const sum = dice.dice[0] + dice.dice[1];
+      render();
+      setTimeout(() => {
+        // Stage 3: dice fully faded — bring the panel back.
+        prematchBackdrop.classList.remove("rolling");
+        commitPreMatchRoll(sum);
+        // Stage 4: re-enable button only after the panel finishes returning.
+        setTimeout(() => { prematchRollBtn.disabled = false; }, PANEL_FADE_MS);
+      }, DICE_LIFE_MS);
+    }, PANEL_FADE_MS);
   });
 
   // --- Players section apply ---
