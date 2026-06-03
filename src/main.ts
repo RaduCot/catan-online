@@ -118,6 +118,7 @@ async function main() {
   const rollBtn = document.getElementById("roll-toggle") as HTMLButtonElement;
   const endTurnBtn = document.getElementById("end-turn-btn") as HTMLButtonElement;
   const startMatchBtn = document.getElementById("start-match-btn") as HTMLButtonElement;
+  const matchStatusEl = document.getElementById("match-status") as HTMLDivElement | null;
   const numScaleInput = document.getElementById("numScale") as HTMLInputElement;
   const numOffXInput = document.getElementById("numOffX") as HTMLInputElement;
   const numOffYInput = document.getElementById("numOffY") as HTMLInputElement;
@@ -1184,6 +1185,27 @@ async function main() {
     // Start-match is only available pre-match (sandbox). Once the match is
     // running, hide it so the player can't kick off a duplicate pre-match.
     startMatchBtn.style.display = phase === "pre-match" ? "" : "none";
+    // Match status pill: derive a human-readable phase + active player label.
+    if (matchStatusEl) {
+      const players = getPlayers();
+      const activeId = getActivePlayerId();
+      const active = players.find((p) => p.id === activeId);
+      const tag = active ? active.name : `P${activeId + 1}`;
+      let text = "Sandbox";
+      if (phase === "pre-match") {
+        text = "Pre-match";
+      } else if (phase === "opening") {
+        const step = getPlacementStep();
+        if (step === "initial-s1" || step === "initial-s2") text = `${tag} placing — settlement`;
+        else if (step === "initial-b1" || step === "initial-b2") text = `${tag} placing — road`;
+        else text = `${tag} placing`;
+      } else if (phase === "roll") {
+        text = `${tag} to roll`;
+      } else if (phase === "main") {
+        text = `${tag} — main`;
+      }
+      matchStatusEl.textContent = text;
+    }
   };
 
   startMatchBtn.addEventListener("click", () => {

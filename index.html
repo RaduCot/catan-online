@@ -4,324 +4,680 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Catan Online</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap"
+      rel="stylesheet"
+    />
     <style>
-      html, body { margin: 0; height: 100%; background: #1b3a5b; overflow: hidden; font-family: system-ui, sans-serif; color: #eee; }
+      /* =====================================================================
+       * Catan Online — chrome design contract
+       * =====================================================================
+       * Two-palette system. Keep them apart on purpose.
+       *
+       *  GAMEPLAY (cream + warm shadows): everything the player touches during
+       *  a match — HUD cards, modals, player strip, action buttons, resource
+       *  HUD, trade picker, pre-match. Reads as "tabletop felt": rounded,
+       *  bouncy, generously padded, bold display numerals.
+       *
+       *  DEV / DEBUG (slate, muted): the rendering-knob drawer. Tight,
+       *  small-font, low-contrast slate. Looks like a tool — never competes
+       *  with gameplay for attention. No bounce on dev surfaces.
+       *
+       * Tokens by intent:
+       *   --bg-deep            page void behind the canvas
+       *   --surface-1/2/3      cream card / recessed cream / hover cream
+       *   --surface-ink(-soft) text on cream surfaces
+       *   --surface-line       hairline divider on cream
+       *   --accent-gold        primary CTA, dice, active player ring
+       *   --accent-gold-dim    inset edge on gold buttons
+       *   --accent-terracotta  warning / active highlight
+       *   --accent-forest      confirm / success
+       *   --accent-ocean       info
+       *   --dev-*              slate dev palette (bg / surface / ink / line)
+       *   --r-card/pill/input  rounded radii — gameplay is "card or pill"
+       *   --shadow-card/lift   warm drop shadow for cream surfaces
+       *   --shadow-inset       inner highlight + bottom edge on cream buttons
+       *   --shadow-dev         flat neutral shadow for dev surfaces
+       *   --ease-bounce/soft   bounce for gameplay, soft for everything else
+       *
+       * Rules for future work:
+       *   - New GAMEPLAY surface  → --surface-* + --accent-* + --shadow-card,
+       *     radius from --r-card / --r-pill, ease with --ease-bounce on hover.
+       *   - New DEV surface       → --dev-* tokens, rectangular radii (6–8px),
+       *     no bounce, small font.
+       *   - Numerals (counts, sums, dice totals) use the display font in 700+.
+       *   - All inputs/buttons inherit reset rules near the top of the sheet.
+       * =====================================================================
+       */
+
+      :root {
+        /* Surfaces */
+        --bg-deep: #0c1f33;
+        --surface-1: #f6ecd2;
+        --surface-2: #ecdfba;
+        --surface-3: #fff7e3;
+        --surface-ink: #2a1b0e;
+        --surface-ink-soft: #6b513a;
+        --surface-line: rgba(80, 50, 20, 0.12);
+
+        /* Accents */
+        --accent-gold: #f4c757;
+        --accent-gold-dim: #c89a3a;
+        --accent-terracotta: #d96a4a;
+        --accent-forest: #3e8a5b;
+        --accent-ocean: #3f7aa8;
+
+        /* Dev / debug */
+        --dev-bg: #1a2738;
+        --dev-surface: #243549;
+        --dev-ink: #b8c5d4;
+        --dev-ink-soft: #7d8da0;
+        --dev-line: rgba(255, 255, 255, 0.06);
+        --dev-accent: #5c7a99;
+
+        /* Type */
+        --font-display: "Nunito", "Quicksand", system-ui, -apple-system, sans-serif;
+        --font-ui: system-ui, -apple-system, sans-serif;
+
+        /* Geometry */
+        --r-card: 18px;
+        --r-pill: 999px;
+        --r-input: 10px;
+        --pad-card: 16px;
+        --pad-tight: 8px;
+
+        /* Shadows */
+        --shadow-card: 0 8px 24px rgba(60, 40, 20, 0.18), 0 2px 6px rgba(60, 40, 20, 0.10);
+        --shadow-lift: 0 12px 32px rgba(60, 40, 20, 0.28);
+        --shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.6), inset 0 -2px 0 rgba(80, 50, 20, 0.08);
+        --shadow-dev: 0 4px 12px rgba(0, 0, 0, 0.3);
+
+        /* Motion */
+        --ease-bounce: cubic-bezier(.34, 1.56, .64, 1);
+        --ease-soft: cubic-bezier(.4, 0, .2, 1);
+      }
+
+      /* ---------- tiny reset ---------- */
+      *, *::before, *::after { box-sizing: border-box; }
+      html, body {
+        margin: 0; height: 100%;
+        background: var(--bg-deep);
+        overflow: hidden;
+        font-family: var(--font-display);
+        color: #eee;
+        -webkit-font-smoothing: antialiased;
+      }
+      button {
+        font-family: inherit;
+        font-size: inherit;
+        line-height: 1.2;
+        border: none;
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+        padding: 0;
+      }
+      button:focus-visible {
+        outline: 2px solid var(--accent-gold);
+        outline-offset: 2px;
+      }
+      input, select {
+        font-family: inherit;
+        font-size: inherit;
+      }
+      input:focus-visible, select:focus-visible {
+        outline: 2px solid var(--accent-gold);
+        outline-offset: 1px;
+      }
+
       #app { position: fixed; inset: 0; }
       canvas { display: block; width: 100%; height: 100%; }
+
+      /* =====================================================================
+       * GAMEPLAY — top action bar (status + actions)
+       * ===================================================================== */
       #hud {
-        position: fixed; top: 8px; left: 8px; font-size: 13px; z-index: 10;
-        display: flex; flex-direction: column; gap: 6px; align-items: flex-start;
+        position: fixed; top: 12px; left: 12px; z-index: 10;
+        display: flex; flex-direction: column; gap: 10px; align-items: flex-start;
+        max-width: min(360px, 32vw);
       }
-      #hud-toggle, #reveal-toggle, #roll-toggle {
-        background: rgba(0,0,0,0.6); color: #eee; border: 1px solid rgba(255,255,255,0.15);
-        border-radius: 6px; padding: 6px 10px; cursor: pointer; font: inherit;
+      #top-actions {
+        display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
       }
-      #reveal-toggle.active { background: rgba(80,140,200,0.85); }
+      #match-status {
+        background: var(--surface-1);
+        color: var(--surface-ink);
+        font-weight: 800;
+        font-size: 13px;
+        letter-spacing: 0.02em;
+        padding: 8px 14px;
+        border-radius: var(--r-pill);
+        box-shadow: var(--shadow-card), var(--shadow-inset);
+        white-space: nowrap;
+      }
+
+      /* gameplay action buttons */
+      .gp-btn {
+        font-family: var(--font-display);
+        font-weight: 800;
+        font-size: 13px;
+        padding: 9px 16px;
+        border-radius: var(--r-pill);
+        background: var(--surface-1);
+        color: var(--surface-ink);
+        box-shadow: var(--shadow-card), var(--shadow-inset);
+        transition: transform 0.18s var(--ease-bounce),
+                    box-shadow 0.2s var(--ease-soft),
+                    background 0.15s var(--ease-soft);
+      }
+      .gp-btn:hover:not(:disabled) {
+        transform: translateY(-2px) scale(1.03);
+        background: var(--surface-3);
+        box-shadow: var(--shadow-lift), var(--shadow-inset);
+      }
+      .gp-btn:active:not(:disabled) { transform: translateY(0) scale(0.98); }
+      .gp-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+      .gp-btn.primary {
+        background: linear-gradient(180deg, var(--accent-gold) 0%, var(--accent-gold-dim) 100%);
+        color: #2a1b0e;
+      }
+      .gp-btn.primary:hover:not(:disabled) {
+        background: linear-gradient(180deg, #ffd870, var(--accent-gold-dim));
+      }
+      .gp-btn.confirm {
+        background: linear-gradient(180deg, #4fa872 0%, var(--accent-forest) 100%);
+        color: #fff;
+      }
+      .gp-btn.danger {
+        background: linear-gradient(180deg, #e58467 0%, var(--accent-terracotta) 100%);
+        color: #fff;
+      }
+
+      /* =====================================================================
+       * GAMEPLAY — right-side card column
+       * ===================================================================== */
       #hud-panel {
-        background: rgba(0,0,0,0.55); border-radius: 6px; padding: 6px 8px;
-        display: flex; flex-direction: column; gap: 2px;
-        max-height: calc(100vh - 60px); overflow-y: auto;
+        background: var(--surface-1);
+        color: var(--surface-ink);
+        border-radius: var(--r-card);
+        padding: 14px 16px;
+        box-shadow: var(--shadow-card);
+        display: flex; flex-direction: column; gap: 6px;
+        max-height: calc(100vh - 90px);
+        overflow-y: auto;
+        font-family: var(--font-display);
+        font-size: 13px;
+        width: 320px;
       }
       #hud-panel.hidden { display: none; }
-      #hud-panel details { border-top: 1px solid rgba(255,255,255,0.08); }
+      #hud-panel details {
+        border-top: 1px solid var(--surface-line);
+        padding: 4px 0;
+      }
       #hud-panel details:first-child { border-top: none; }
       #hud-panel summary {
-        cursor: pointer; padding: 6px 2px; list-style: none; font-weight: 600;
-        opacity: 0.9; user-select: none;
+        cursor: pointer;
+        padding: 8px 4px;
+        list-style: none;
+        font-weight: 800;
+        font-size: 13px;
+        color: var(--surface-ink);
+        user-select: none;
+        letter-spacing: 0.01em;
       }
       #hud-panel summary::-webkit-details-marker { display: none; }
       #hud-panel summary::before {
-        content: "▸"; display: inline-block; width: 12px; transition: transform 0.1s;
+        content: "▸";
+        display: inline-block;
+        width: 14px;
+        color: var(--surface-ink-soft);
+        transition: transform 0.15s var(--ease-soft);
       }
       #hud-panel details[open] > summary::before { transform: rotate(90deg); }
-      #hud-panel .group { display: flex; flex-direction: column; gap: 6px; padding: 4px 0 8px 14px; }
-      #hud-panel label { display: flex; align-items: center; gap: 10px; }
-      #hud-panel .lbl { width: 72px; }
-      #hud-panel input, #hud-panel select { width: 110px; box-sizing: border-box; }
-      #hud-panel button { font: inherit; cursor: pointer; }
-      #regen { padding: 0; margin-left: 4px; line-height: 1; font-size: 16px; background: transparent; border: none; color: inherit; }
-      #regen:hover { filter: brightness(1.2); }
+      #hud-panel .group {
+        display: flex; flex-direction: column; gap: 8px;
+        padding: 4px 0 10px 18px;
+      }
+      #hud-panel label {
+        display: flex; align-items: center; gap: 10px;
+        color: var(--surface-ink-soft);
+        font-weight: 600;
+      }
+      #hud-panel .lbl { width: 96px; font-size: 12px; }
+      #hud-panel input[type="number"],
+      #hud-panel input[type="text"],
+      #hud-panel select {
+        width: 130px; padding: 5px 8px;
+        background: #fff;
+        border: 1px solid var(--surface-line);
+        border-radius: var(--r-input);
+        color: var(--surface-ink);
+      }
+      #hud-panel input[type="color"] {
+        width: 36px; height: 26px; padding: 0;
+        border: 1px solid var(--surface-line);
+        border-radius: 6px; background: #fff;
+      }
+      #hud-panel input[type="checkbox"] {
+        width: 18px; height: 18px;
+        accent-color: var(--accent-forest);
+      }
+      #hud-panel button {
+        padding: 6px 12px;
+        border-radius: var(--r-pill);
+        background: var(--surface-2);
+        color: var(--surface-ink);
+        font-weight: 700; font-size: 12px;
+        box-shadow: var(--shadow-inset);
+        transition: transform 0.15s var(--ease-bounce), background 0.15s;
+      }
+      #hud-panel button:hover { transform: translateY(-1px); background: var(--surface-3); }
+      #regen {
+        padding: 4px 8px; margin-left: 4px;
+        background: var(--surface-2); border-radius: 8px;
+        font-size: 14px;
+      }
+      #players-apply {
+        background: linear-gradient(180deg, var(--accent-gold), var(--accent-gold-dim));
+        margin-top: 4px;
+      }
 
+      /* The right column wraps the existing hud-panel as a card stack */
+      #gameplay-right {
+        position: fixed;
+        top: 64px;
+        right: 12px;
+        z-index: 10;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 12px;
+        max-height: calc(100vh - 80px);
+      }
+
+      /* =====================================================================
+       * GAMEPLAY — Resource HUD (bottom bar)
+       * ===================================================================== */
       #resource-hud {
         display: flex; gap: 6px;
-        background: rgba(0, 0, 0, 0.6);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 12px;
-        padding: 8px 10px;
-        backdrop-filter: blur(6px);
-        -webkit-backdrop-filter: blur(6px);
-        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+        background: var(--surface-1);
+        color: var(--surface-ink);
+        border-radius: var(--r-card);
+        padding: 12px 14px;
+        box-shadow: var(--shadow-card);
         user-select: none;
       }
       #resource-hud .res {
         display: flex; flex-direction: column; align-items: center;
-        min-width: 52px; padding: 4px 6px; border-radius: 8px;
-        transition: background 0.15s;
+        min-width: 56px; padding: 4px 6px;
+        border-radius: 12px;
+        transition: background 0.15s var(--ease-soft), transform 0.18s var(--ease-bounce);
       }
-      #resource-hud .res:hover { background: rgba(255, 255, 255, 0.06); }
+      #resource-hud .res:hover { background: var(--surface-2); transform: translateY(-2px); }
       #resource-hud .res img {
-        width: 36px; height: 36px; object-fit: contain;
+        width: 38px; height: 38px; object-fit: contain;
         image-rendering: -webkit-optimize-contrast;
-        filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
+        filter: drop-shadow(0 2px 3px rgba(60, 40, 20, 0.25));
       }
       #resource-hud .res .count {
-        margin-top: 2px; font-size: 15px; font-weight: 700;
+        margin-top: 2px;
+        font-family: var(--font-display);
+        font-size: 17px; font-weight: 800;
         font-variant-numeric: tabular-nums;
-        color: #f4e4bc; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+        color: var(--surface-ink);
       }
       #resource-hud .res[data-count="0"] { opacity: 0.45; }
-      #resource-hud .res[data-count="0"] .count { color: #aaa; }
+      #resource-hud .res[data-count="0"] .count { color: var(--surface-ink-soft); }
       #resource-hud .total {
-        align-self: center; padding: 0 10px 0 8px;
-        border-left: 1px solid rgba(255, 255, 255, 0.12);
+        align-self: center; padding: 0 6px 0 12px;
+        border-left: 1px solid var(--surface-line);
         margin-left: 4px;
-        font-size: 13px; color: rgba(255, 255, 255, 0.65);
+        font-size: 11px; color: var(--surface-ink-soft);
+        font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
         display: flex; flex-direction: column; align-items: center; gap: 2px;
       }
       #resource-hud .total .num {
-        font-size: 18px; font-weight: 700; color: #f4e4bc;
+        font-size: 20px; font-weight: 900;
+        color: var(--surface-ink);
         font-variant-numeric: tabular-nums;
       }
 
       #bottom-bar {
-        position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
-        z-index: 10; display: flex; gap: 10px; align-items: stretch;
+        position: fixed; bottom: 18px; left: 50%;
+        transform: translateX(-50%);
+        z-index: 10; display: flex; gap: 12px; align-items: stretch;
       }
       #trade-toggle {
-        background: rgba(0, 0, 0, 0.6); color: #f4e4bc;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 12px;
-        padding: 0 18px; cursor: pointer; font: inherit;
-        font-size: 14px; font-weight: 700; letter-spacing: 0.04em;
+        background: linear-gradient(180deg, var(--accent-gold), var(--accent-gold-dim));
+        color: #2a1b0e;
+        border-radius: var(--r-pill);
+        padding: 0 22px;
+        font-family: var(--font-display);
+        font-size: 14px; font-weight: 900; letter-spacing: 0.08em;
         text-transform: uppercase;
-        backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
-        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
-        transition: background 0.12s, transform 0.12s;
+        box-shadow: var(--shadow-card), var(--shadow-inset);
+        transition: transform 0.18s var(--ease-bounce), box-shadow 0.2s;
       }
-      #trade-toggle:hover { background: rgba(244, 199, 90, 0.18); transform: translateY(-1px); }
+      #trade-toggle:hover:not(:disabled) {
+        transform: translateY(-2px) scale(1.04);
+        box-shadow: var(--shadow-lift), var(--shadow-inset);
+      }
+      #trade-toggle:disabled { opacity: 0.45; cursor: not-allowed; }
 
+      /* =====================================================================
+       * GAMEPLAY — Modals (trade + pre-match)
+       * ===================================================================== */
+      .modal-backdrop,
       #trade-backdrop {
-        position: fixed; inset: 0; z-index: 25;
-        background: rgba(0, 0, 0, 0.55);
-        backdrop-filter: blur(2px);
-        -webkit-backdrop-filter: blur(2px);
+        position: fixed; inset: 0; z-index: 30;
+        background: rgba(12, 31, 51, 0.55);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
         display: flex; align-items: center; justify-content: center;
+        animation: backdrop-fade 0.2s var(--ease-soft);
       }
+      .modal-backdrop.hidden,
       #trade-backdrop.hidden { display: none; }
-      #trade-panel {
-        min-width: 380px; max-width: 90vw;
-        background: rgba(20, 26, 38, 0.96);
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        border-radius: 14px;
-        padding: 18px 20px 16px;
-        box-shadow: 0 14px 40px rgba(0, 0, 0, 0.55);
-        color: #eee; font-size: 13px;
+      @keyframes backdrop-fade {
+        from { opacity: 0; }
+        to { opacity: 1; }
       }
-      #trade-panel h3 {
-        margin: 0 0 4px; font-size: 15px; font-weight: 700;
-        letter-spacing: 0.02em;
+      @keyframes modal-pop {
+        0% { transform: scale(0.85) translateY(20px); opacity: 0; }
+        100% { transform: scale(1) translateY(0); opacity: 1; }
       }
-      #trade-panel .sub { opacity: 0.6; font-size: 12px; margin-bottom: 14px; line-height: 1.4; }
-      #trade-panel .trade-section { margin: 10px 0; }
+
+      #trade-panel,
+      #prematch-panel {
+        min-width: 420px; max-width: 92vw;
+        background: var(--surface-1);
+        color: var(--surface-ink);
+        border-radius: var(--r-card);
+        padding: 24px 26px 20px;
+        box-shadow: var(--shadow-lift);
+        font-family: var(--font-display);
+        font-size: 13px;
+        animation: modal-pop 0.32s var(--ease-bounce);
+      }
+      #trade-panel h3,
+      #prematch-panel h3 {
+        margin: 0 0 6px;
+        font-family: var(--font-display);
+        font-size: 22px; font-weight: 900;
+        color: var(--surface-ink);
+        letter-spacing: -0.01em;
+      }
+      #trade-panel .sub {
+        color: var(--surface-ink-soft);
+        font-size: 13px; margin-bottom: 18px; line-height: 1.45;
+        font-weight: 600;
+      }
+      #trade-panel .trade-section { margin: 12px 0; }
       #trade-panel .section-label {
-        font-weight: 700; opacity: 0.7; text-transform: uppercase;
-        font-size: 11px; letter-spacing: 0.08em; margin-bottom: 6px;
+        font-weight: 800;
+        color: var(--surface-ink-soft);
+        text-transform: uppercase;
+        font-size: 11px; letter-spacing: 0.12em;
+        margin-bottom: 8px;
       }
-      #trade-panel .trade-row { display: flex; gap: 6px; }
+      #trade-panel .trade-row { display: flex; gap: 8px; }
+
       .trade-btn {
         position: relative;
-        width: 60px; height: 70px; padding: 0;
-        background: rgba(255, 255, 255, 0.04);
-        border: 2px solid rgba(255, 255, 255, 0.08);
-        border-radius: 10px; cursor: pointer; color: inherit; font: inherit;
+        width: 70px; height: 84px;
+        background: var(--surface-2);
+        border: 2px solid transparent;
+        border-radius: 14px;
+        color: var(--surface-ink);
         display: flex; flex-direction: column; align-items: center; justify-content: center;
-        gap: 2px;
-        transition: background 0.12s, border-color 0.12s, transform 0.12s;
+        gap: 3px;
+        box-shadow: var(--shadow-inset);
+        transition: transform 0.18s var(--ease-bounce),
+                    border-color 0.15s,
+                    box-shadow 0.2s,
+                    background 0.15s;
       }
-      .trade-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.08); transform: translateY(-1px); }
-      .trade-btn:active:not(:disabled) { transform: translateY(0); }
-      .trade-btn img { width: 32px; height: 32px; pointer-events: none; }
+      .trade-btn:hover:not(:disabled) {
+        transform: translateY(-3px) scale(1.04);
+        background: var(--surface-3);
+        box-shadow: var(--shadow-card), var(--shadow-inset);
+      }
+      .trade-btn:active:not(:disabled) { transform: translateY(0) scale(0.97); }
+      .trade-btn img { width: 38px; height: 38px; pointer-events: none; }
       .trade-btn .stock {
-        font-size: 10px; opacity: 0.55;
+        font-size: 11px; font-weight: 700;
+        color: var(--surface-ink-soft);
         font-variant-numeric: tabular-nums;
       }
       .trade-btn.selected {
-        border-color: #f4c75a;
-        background: rgba(244, 199, 90, 0.15);
-        box-shadow: 0 0 0 1px rgba(244, 199, 90, 0.4);
+        border-color: var(--accent-gold);
+        background: var(--surface-3);
+        box-shadow: var(--shadow-lift), 0 0 0 2px rgba(244, 199, 87, 0.4);
       }
       .trade-btn.has-pile {
-        border-color: rgba(244, 199, 90, 0.55);
-        background: rgba(244, 199, 90, 0.08);
+        border-color: var(--accent-gold-dim);
+        background: var(--surface-3);
       }
-      .trade-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+      .trade-btn:disabled { opacity: 0.35; cursor: not-allowed; }
       .trade-btn .pile-badge {
-        position: absolute; top: -7px; right: -7px;
-        background: linear-gradient(180deg, #f4c75a, #b48a2a);
-        color: #1b2434; font-size: 11px; font-weight: 800;
-        min-width: 18px; height: 18px; padding: 0 5px;
+        position: absolute; top: -8px; right: -8px;
+        background: linear-gradient(180deg, var(--accent-gold), var(--accent-gold-dim));
+        color: var(--surface-ink);
+        font-size: 12px; font-weight: 900;
+        min-width: 22px; height: 22px; padding: 0 6px;
         border-radius: 999px;
         display: flex; align-items: center; justify-content: center;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+        box-shadow: 0 2px 4px rgba(60, 40, 20, 0.3);
         pointer-events: none;
       }
       .trade-btn .pile-badge.hidden { display: none; }
       .trade-btn .rate-pill {
         position: absolute; top: -6px; left: -6px;
-        background: rgba(255, 255, 255, 0.12);
-        color: #f4e4bc; font-size: 9px; font-weight: 800;
-        padding: 1px 5px; border-radius: 6px;
-        letter-spacing: 0.04em;
+        background: var(--surface-ink-soft);
+        color: #fff8e0;
+        font-size: 10px; font-weight: 900;
+        padding: 2px 6px; border-radius: 8px;
+        letter-spacing: 0.06em;
         pointer-events: none;
       }
-      .trade-btn .rate-pill.fav {
-        background: linear-gradient(180deg, #2e7d3e, #1a4a26);
-        color: #fff;
-      }
-      .trade-btn .rate-pill.mid {
-        background: linear-gradient(180deg, #3a5a8a, #1f365a);
-        color: #fff;
-      }
+      .trade-btn .rate-pill.fav { background: var(--accent-forest); color: #fff; }
+      .trade-btn .rate-pill.mid { background: var(--accent-ocean); color: #fff; }
+
       #trade-panel .arrow {
-        text-align: center; opacity: 0.5; margin: 6px 0; font-size: 18px;
+        text-align: center; color: var(--surface-ink-soft);
+        margin: 10px 0; font-size: 24px; font-weight: 900;
       }
       #trade-panel .trade-summary {
-        margin-top: 8px; padding: 8px 10px;
-        background: rgba(0, 0, 0, 0.3);
-        border-radius: 6px;
-        font-size: 12px; opacity: 0.85;
+        margin-top: 10px; padding: 10px 14px;
+        background: var(--surface-2);
+        border-radius: var(--r-input);
+        font-size: 13px; color: var(--surface-ink-soft);
+        font-variant-numeric: tabular-nums;
+        font-weight: 600;
+      }
+      #trade-panel .trade-summary .rate {
+        color: var(--accent-gold-dim);
+        font-weight: 900;
+      }
+
+      #trade-panel .actions,
+      #prematch-panel .actions {
+        display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px;
+      }
+      #trade-panel .actions button,
+      #prematch-panel .actions button {
+        padding: 10px 18px;
+        border-radius: var(--r-pill);
+        font-family: var(--font-display);
+        font-weight: 800;
+        font-size: 13px;
+        background: var(--surface-2);
+        color: var(--surface-ink);
+        box-shadow: var(--shadow-inset);
+        transition: transform 0.18s var(--ease-bounce), background 0.15s;
+      }
+      #trade-panel .actions button:hover:not(:disabled),
+      #prematch-panel .actions button:hover:not(:disabled) {
+        transform: translateY(-2px) scale(1.03);
+        background: var(--surface-3);
+      }
+      #trade-confirm,
+      #prematch-panel .actions .primary {
+        background: linear-gradient(180deg, var(--accent-gold), var(--accent-gold-dim));
+        color: var(--surface-ink);
+      }
+      #trade-confirm:hover:not(:disabled),
+      #prematch-panel .actions .primary:hover:not(:disabled) {
+        background: linear-gradient(180deg, #ffd870, var(--accent-gold-dim));
+      }
+      #trade-confirm:disabled,
+      #prematch-panel .actions .primary:disabled {
+        opacity: 0.4; cursor: not-allowed;
+      }
+
+      /* Pre-match rows — horizontal player cards */
+      #prematch-rows {
+        display: flex; flex-direction: column; gap: 8px;
+        margin: 14px 0 4px;
+      }
+      #prematch-rows .row {
+        display: flex; align-items: center; gap: 14px;
+        padding: 12px 16px;
+        background: var(--surface-2);
+        border: 2px solid transparent;
+        border-radius: var(--r-card);
+        transition: transform 0.25s var(--ease-bounce),
+                    border-color 0.2s,
+                    box-shadow 0.2s;
+      }
+      #prematch-rows .row.active {
+        background: var(--surface-3);
+        border-color: var(--accent-gold);
+        transform: scale(1.03);
+        box-shadow: var(--shadow-card), 0 0 0 4px rgba(244, 199, 87, 0.18);
+      }
+      #prematch-rows .row .swatch {
+        width: 28px; height: 28px;
+        border-radius: 50%;
+        box-shadow: 0 0 0 3px var(--surface-1), 0 0 0 4px rgba(60, 40, 20, 0.2);
+        flex-shrink: 0;
+      }
+      #prematch-rows .row .name {
+        flex: 1;
+        font-weight: 800; font-size: 15px;
+        color: var(--surface-ink);
+      }
+      #prematch-rows .row .rolls {
+        color: var(--surface-ink-soft);
+        font-weight: 700; font-size: 12px;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 0.04em;
+      }
+      #prematch-rows .row .sum {
+        font-family: var(--font-display);
+        font-weight: 900;
+        font-size: 26px;
+        color: var(--accent-gold-dim);
+        min-width: 42px;
+        text-align: right;
         font-variant-numeric: tabular-nums;
       }
-      #trade-panel .trade-summary .rate { color: #f4c75a; font-weight: 700; }
-      #trade-reset {
-        background: rgba(255, 255, 255, 0.05); color: #ccc;
-      }
-      #trade-panel .actions {
-        display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px;
-      }
-      #trade-panel .actions button {
-        padding: 7px 14px; border-radius: 6px; font: inherit;
-        cursor: pointer; border: 1px solid rgba(255, 255, 255, 0.15);
-      }
-      #trade-cancel { background: rgba(255, 255, 255, 0.05); color: #ccc; }
-      #trade-confirm {
-        background: #f4c75a; color: #1b2434; border: none; font-weight: 700;
-      }
-      #trade-confirm:disabled {
-        background: rgba(244, 199, 90, 0.2); color: rgba(255, 255, 255, 0.4);
-        cursor: not-allowed;
-      }
+      #prematch-rows .row.active .sum { color: var(--surface-ink); }
 
+      /* =====================================================================
+       * GAMEPLAY — player strip (top center)
+       * ===================================================================== */
       #player-strip {
-        position: fixed; top: 8px; left: 50%; transform: translateX(-50%);
-        z-index: 10; display: flex; gap: 8px;
-        background: rgba(0, 0, 0, 0.55);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 999px;
-        padding: 6px 10px;
-        backdrop-filter: blur(6px);
-        -webkit-backdrop-filter: blur(6px);
+        position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+        z-index: 10;
+        display: flex; gap: 8px;
+        background: var(--surface-1);
+        border-radius: var(--r-pill);
+        padding: 8px 12px;
+        box-shadow: var(--shadow-card);
       }
       #player-strip .pbadge {
-        display: flex; align-items: center; gap: 6px;
-        padding: 4px 10px; border-radius: 999px;
-        background: rgba(255, 255, 255, 0.04);
-        border: 2px solid transparent;
+        display: flex; flex-direction: column; align-items: center;
+        gap: 4px;
+        padding: 4px 10px 6px;
+        border-radius: 14px;
+        background: transparent;
         cursor: pointer; user-select: none;
         font-size: 12px;
+        color: var(--surface-ink);
+        transition: transform 0.2s var(--ease-bounce), background 0.15s;
+        min-width: 60px;
       }
-      #player-strip .pbadge:hover { background: rgba(255, 255, 255, 0.08); }
-      #player-strip .pbadge.active { border-color: #f4c75a; box-shadow: 0 0 0 1px rgba(244,199,90,0.35); }
-      #player-strip .pbadge.viewer { background: rgba(244, 199, 90, 0.12); }
+      #player-strip .pbadge:hover { background: var(--surface-2); transform: translateY(-2px); }
       #player-strip .pbadge .swatch {
-        width: 14px; height: 14px; border-radius: 4px;
-        box-shadow: inset 0 0 0 1px rgba(0,0,0,0.4);
+        width: 22px; height: 22px;
+        border-radius: 50%;
+        box-shadow: 0 0 0 2px var(--surface-1), 0 0 0 3px rgba(60, 40, 20, 0.18);
       }
-      #player-strip .pbadge .pname { font-weight: 700; }
-      #player-strip .pbadge .pcards { opacity: 0.75; font-variant-numeric: tabular-nums; }
-
-      #end-turn-btn {
-        background: #f4c75a; color: #1b2434; border: none;
-        border-radius: 10px; padding: 0 16px; cursor: pointer;
-        font: inherit; font-weight: 700;
+      #player-strip .pbadge.active {
+        transform: scale(1.08);
+        background: var(--surface-2);
       }
-      #end-turn-btn:disabled { background: rgba(244,199,90,0.2); color: rgba(255,255,255,0.4); cursor: not-allowed; }
-
-      .modal-backdrop {
-        position: fixed; inset: 0; z-index: 30;
-        background: rgba(0, 0, 0, 0.6);
-        backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
-        display: flex; align-items: center; justify-content: center;
+      #player-strip .pbadge.active .swatch {
+        box-shadow: 0 0 0 2px var(--surface-1), 0 0 0 4px var(--accent-gold);
       }
-      .modal-backdrop.hidden { display: none; }
-      #prematch-panel {
-        min-width: 380px; max-width: 90vw;
-        background: rgba(20, 26, 38, 0.96);
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        border-radius: 14px;
-        padding: 18px 20px 16px;
-        box-shadow: 0 14px 40px rgba(0, 0, 0, 0.55);
-        color: #eee; font-size: 13px;
+      #player-strip .pbadge.viewer { background: rgba(244, 199, 87, 0.22); }
+      #player-strip .pbadge .pname {
+        font-weight: 800; font-size: 12px;
+        color: var(--surface-ink);
       }
-      #prematch-panel h3 { margin: 0 0 12px; font-size: 15px; }
-      #prematch-rows { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; }
-      #prematch-rows .row {
-        display: flex; align-items: center; gap: 10px;
-        padding: 6px 10px; border-radius: 8px;
-        background: rgba(255,255,255,0.03);
-      }
-      #prematch-rows .row.active { background: rgba(244,199,90,0.14); border: 1px solid rgba(244,199,90,0.4); }
-      #prematch-rows .swatch { width: 14px; height: 14px; border-radius: 4px; }
-      #prematch-rows .row .name { flex: 1; font-weight: 600; }
-      #prematch-rows .row .rolls { opacity: 0.7; font-variant-numeric: tabular-nums; }
-      #prematch-rows .row .sum { font-weight: 700; color: #f4c75a; min-width: 32px; text-align: right; }
-      #prematch-panel .actions {
-        display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px;
-      }
-      #prematch-panel .actions button {
-        padding: 7px 14px; border-radius: 6px; font: inherit;
-        cursor: pointer; border: 1px solid rgba(255,255,255,0.15);
-        background: rgba(255,255,255,0.05); color: #eee;
-      }
-      #prematch-panel .actions .primary {
-        background: #f4c75a; color: #1b2434; border: none; font-weight: 700;
-      }
-      #prematch-panel .actions .primary:disabled {
-        background: rgba(244,199,90,0.2); color: rgba(255,255,255,0.4); cursor: not-allowed;
+      #player-strip .pbadge .pcards {
+        background: var(--surface-ink);
+        color: var(--surface-1);
+        padding: 1px 8px;
+        border-radius: var(--r-pill);
+        font-weight: 800;
+        font-size: 11px;
+        font-variant-numeric: tabular-nums;
       }
 
+      /* =====================================================================
+       * GAMEPLAY — passives panel
+       * ===================================================================== */
       #passives-panel {
-        position: fixed; top: 56px; right: 8px; z-index: 10;
-        display: flex; flex-direction: column; gap: 4px;
-        align-items: flex-end;
+        position: fixed;
+        bottom: 90px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 10;
+        display: flex; gap: 6px;
+        flex-wrap: wrap; justify-content: center;
       }
       #passives-panel.hidden { display: none; }
-      #passives-panel .header {
-        font-size: 10px; letter-spacing: 0.1em;
-        text-transform: uppercase; opacity: 0.55;
-        padding: 0 8px;
-      }
+      #passives-panel .header { display: none; }
       #passives-panel .badge {
-        background: rgba(0, 0, 0, 0.6);
-        border: 1px solid rgba(244, 199, 90, 0.45);
-        border-radius: 999px;
-        padding: 4px 10px 4px 6px;
-        font-size: 12px;
+        background: var(--surface-1);
+        color: var(--surface-ink);
+        border: 2px solid var(--accent-gold);
+        border-radius: var(--r-pill);
+        padding: 4px 12px 4px 6px;
+        font-size: 12px; font-weight: 800;
         display: flex; align-items: center; gap: 6px;
-        color: #f4e4bc;
-        backdrop-filter: blur(4px);
-        -webkit-backdrop-filter: blur(4px);
+        box-shadow: var(--shadow-card);
       }
-      #passives-panel .badge img { width: 18px; height: 18px; }
-      #passives-panel .badge.generic { border-color: rgba(160, 200, 255, 0.5); color: #d2e5ff; }
-      #passives-panel .badge .ratio { font-weight: 800; font-variant-numeric: tabular-nums; }
+      #passives-panel .badge img { width: 20px; height: 20px; }
+      #passives-panel .badge.generic { border-color: var(--accent-ocean); }
+      #passives-panel .badge .ratio {
+        font-weight: 900; font-variant-numeric: tabular-nums;
+      }
 
+      /* =====================================================================
+       * GAMEPLAY — resource bump animation
+       * ===================================================================== */
       #resource-hud .res.bump {
-        animation: res-bump 0.45s cubic-bezier(.34, 1.56, .64, 1);
+        animation: res-bump 0.45s var(--ease-bounce);
       }
       @keyframes res-bump {
         0%   { transform: scale(1); }
-        45%  { transform: scale(1.32); }
+        45%  { transform: scale(1.35) translateY(-4px); }
         100% { transform: scale(1); }
       }
 
@@ -339,22 +695,160 @@
         transform: translate(-50%, -50%) scale(0);
         opacity: 0;
       }
+
+      /* =====================================================================
+       * DEV DRAWER — slate, muted, "tool not toy"
+       * ===================================================================== */
+      #dev-toggle {
+        position: fixed;
+        bottom: 18px;
+        right: 18px;
+        z-index: 15;
+        width: 44px; height: 44px;
+        border-radius: 50%;
+        background: var(--dev-surface);
+        color: var(--dev-ink);
+        font-size: 20px;
+        box-shadow: var(--shadow-dev);
+        border: 1px solid var(--dev-line);
+        transition: background 0.15s var(--ease-soft), color 0.15s;
+      }
+      #dev-toggle:hover { background: #2e4360; color: #fff; }
+
+      #dev-drawer {
+        position: fixed;
+        bottom: 72px;
+        right: 18px;
+        z-index: 15;
+        width: 340px;
+        max-height: calc(100vh - 110px);
+        background: var(--dev-bg);
+        color: var(--dev-ink);
+        border: 1px solid var(--dev-line);
+        border-radius: 10px;
+        box-shadow: var(--shadow-dev);
+        font-family: var(--font-ui);
+        font-size: 12px;
+        display: flex; flex-direction: column;
+        overflow: hidden;
+      }
+      #dev-drawer.hidden { display: none; }
+      #dev-drawer .dev-head {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 8px 12px;
+        background: var(--dev-surface);
+        border-bottom: 1px solid var(--dev-line);
+      }
+      #dev-drawer .dev-head .title {
+        font-size: 11px; letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--dev-ink-soft);
+        font-weight: 700;
+      }
+      #dev-close {
+        color: var(--dev-ink-soft);
+        font-size: 16px;
+        padding: 2px 8px;
+        border-radius: 4px;
+      }
+      #dev-close:hover { color: var(--dev-ink); background: var(--dev-line); }
+
+      #dev-body {
+        overflow-y: auto;
+        padding: 6px 12px 12px;
+        flex: 1;
+      }
+      #dev-body details {
+        border-top: 1px solid var(--dev-line);
+        padding: 2px 0;
+      }
+      #dev-body details:first-child { border-top: none; }
+      #dev-body summary {
+        cursor: pointer;
+        padding: 6px 2px;
+        list-style: none;
+        font-weight: 600;
+        color: var(--dev-ink);
+        font-size: 12px;
+        user-select: none;
+      }
+      #dev-body summary::-webkit-details-marker { display: none; }
+      #dev-body summary::before {
+        content: "▸";
+        display: inline-block;
+        width: 12px;
+        color: var(--dev-ink-soft);
+        transition: transform 0.1s;
+      }
+      #dev-body details[open] > summary::before { transform: rotate(90deg); }
+      #dev-body .group {
+        display: flex; flex-direction: column; gap: 5px;
+        padding: 3px 0 8px 14px;
+      }
+      #dev-body label {
+        display: flex; align-items: center; gap: 8px;
+        color: var(--dev-ink-soft);
+      }
+      #dev-body .lbl { width: 90px; font-size: 11px; }
+      #dev-body input[type="number"],
+      #dev-body input[type="text"],
+      #dev-body select {
+        width: 110px;
+        background: #0f1a29;
+        border: 1px solid var(--dev-line);
+        border-radius: 4px;
+        color: var(--dev-ink);
+        padding: 3px 6px;
+      }
+      #dev-body input[type="color"] {
+        width: 28px; height: 22px; padding: 0;
+        background: transparent;
+        border: 1px solid var(--dev-line);
+        border-radius: 3px;
+      }
+      #dev-body input[type="checkbox"] {
+        accent-color: var(--dev-accent);
+      }
+
+      /* hud-toggle (the controls show/hide) sits with action bar */
+      #hud-toggle {
+        font-family: var(--font-display);
+        font-size: 12px;
+        font-weight: 700;
+        padding: 7px 12px;
+        border-radius: var(--r-pill);
+        background: var(--surface-2);
+        color: var(--surface-ink);
+        box-shadow: var(--shadow-inset);
+        transition: transform 0.15s var(--ease-bounce);
+      }
+      #hud-toggle:hover { transform: translateY(-1px); background: var(--surface-3); }
     </style>
   </head>
   <body>
     <div id="app">
       <canvas id="board"></canvas>
     </div>
+
+    <!-- ===== GAMEPLAY: top-left status + action bar ===== -->
     <div id="hud">
-      <div style="display:flex; gap:6px;">
-        <button id="hud-toggle" aria-expanded="true" aria-controls="hud-panel">controls ▾</button>
-        <button id="restart-toggle" type="button">restart game</button>
-        <button id="start-match-btn" type="button">▶ start match</button>
-        <button id="roll-toggle" type="button">🎲 roll</button>
-        <button id="end-turn-btn" type="button" disabled>End Turn</button>
+      <div id="top-actions">
+        <div id="match-status">Sandbox</div>
+        <button id="start-match-btn" class="gp-btn primary" type="button">▶ Start Match</button>
+        <button id="roll-toggle" class="gp-btn" type="button">🎲 Roll</button>
+        <button id="end-turn-btn" class="gp-btn confirm" type="button" disabled>End Turn</button>
+        <button id="restart-toggle" class="gp-btn danger" type="button">↻ Restart</button>
+        <button id="hud-toggle" aria-expanded="true" aria-controls="hud-panel" type="button">controls ▾</button>
       </div>
+    </div>
+
+    <!-- ===== GAMEPLAY: player strip top-center ===== -->
+    <div id="player-strip" aria-label="players"></div>
+
+    <!-- ===== GAMEPLAY: right column (Match card holding rules/players/map) ===== -->
+    <div id="gameplay-right">
       <div id="hud-panel">
-        <details>
+        <details open>
           <summary>Game Rules</summary>
           <div class="group">
             <label><span class="lbl">mixed bank pile</span><input id="ruleMixedTrade" type="checkbox" /></label>
@@ -363,15 +857,21 @@
             <label><span class="lbl">guaranteed 6/8</span><input id="ruleGuaranteed68" type="checkbox" /></label>
           </div>
         </details>
-        <details>
-          <summary>Resource fog</summary>
-          <div class="group">
-            <label><span class="lbl">enabled</span><input id="fogEnabled" type="checkbox" checked /></label>
-            <label><span class="lbl">color</span><input id="fogColor" type="color" value="#3d3d3d" /></label>
-            <label><span class="lbl">opacity</span><input id="fogOpacity" type="number" step="0.05" min="0" max="1" value="0.4" /></label>
+        <details open>
+          <summary>Players</summary>
+          <div class="group" id="players-group">
+            <label><span class="lbl">count</span><select id="playerCount">
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4" selected>4</option>
+            </select></label>
+            <div id="player-slots"></div>
+            <label><span class="lbl">viewer</span><select id="viewerSelect"></select></label>
+            <button id="players-apply" type="button">Apply / Regen</button>
           </div>
         </details>
-        <details open>
+        <details>
           <summary>Map</summary>
           <div class="group">
             <label><span class="lbl">seed</span><input id="seed" type="number" value="1337" /><button id="regen" type="button" title="randomize seed" aria-label="randomize seed">🎲</button></label>
@@ -381,6 +881,73 @@
               <option value="continent-lakes">continent-lakes</option>
             </select></label>
             <label><span class="lbl">radius</span><input id="radius" type="number" min="1" max="6" value="2" placeholder="auto" /></label>
+          </div>
+        </details>
+      </div>
+    </div>
+
+    <!-- ===== GAMEPLAY: passives panel (above bottom bar) ===== -->
+    <div id="passives-panel" class="hidden" aria-label="trade passives"></div>
+
+    <!-- ===== GAMEPLAY: bottom bar — resource HUD + trade ===== -->
+    <div id="bottom-bar">
+      <div id="resource-hud" aria-label="resources"></div>
+      <button id="trade-toggle" type="button" aria-label="bank trade">Trade</button>
+    </div>
+
+    <div id="resource-fx" aria-hidden="true"></div>
+
+    <!-- ===== GAMEPLAY: pre-match modal ===== -->
+    <div id="prematch-backdrop" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+      <div id="prematch-panel">
+        <h3>Roll for first turn</h3>
+        <div class="sub" style="color: var(--surface-ink-soft); font-size: 13px; margin-bottom: 4px;">Best of three — highest sum starts.</div>
+        <div id="prematch-rows"></div>
+        <div class="actions">
+          <button id="prematch-roll" class="primary" type="button">Roll</button>
+          <button id="prematch-tiebreak" type="button" style="display:none">Re-roll tied</button>
+          <button id="prematch-start" class="primary" type="button" style="display:none">Start Game</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== GAMEPLAY: trade modal ===== -->
+    <div id="trade-backdrop" class="hidden" role="dialog" aria-modal="true" aria-label="bank trade">
+      <div id="trade-panel">
+        <h3>Bank Trade</h3>
+        <div class="sub">Pick cards to give, then a resource to receive. Better rates apply when you own ports.</div>
+        <div class="trade-section">
+          <div class="section-label">Give</div>
+          <div class="trade-row" id="trade-give"></div>
+          <div class="trade-summary" id="trade-summary">Pick what to give.</div>
+        </div>
+        <div class="arrow">↓</div>
+        <div class="trade-section">
+          <div class="section-label">Get</div>
+          <div class="trade-row" id="trade-get"></div>
+        </div>
+        <div class="actions">
+          <button id="trade-reset" type="button">Reset</button>
+          <button id="trade-cancel" type="button">Cancel</button>
+          <button id="trade-confirm" type="button" disabled>Trade</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== DEV: floating gear + drawer ===== -->
+    <button id="dev-toggle" type="button" aria-label="developer settings" title="developer settings">⚙</button>
+    <aside id="dev-drawer" class="hidden" aria-label="developer settings">
+      <div class="dev-head">
+        <span class="title">Dev — rendering</span>
+        <button id="dev-close" type="button" aria-label="close">✕</button>
+      </div>
+      <div id="dev-body">
+        <details>
+          <summary>Resource fog (visual)</summary>
+          <div class="group">
+            <label><span class="lbl">enabled</span><input id="fogEnabled" type="checkbox" checked /></label>
+            <label><span class="lbl">color</span><input id="fogColor" type="color" value="#3d3d3d" /></label>
+            <label><span class="lbl">opacity</span><input id="fogOpacity" type="number" step="0.05" min="0" max="1" value="0.4" /></label>
           </div>
         </details>
         <details>
@@ -462,20 +1029,6 @@
               <option value="soft-light">soft-light</option>
               <option value="darken">darken</option>
             </select></label>
-          </div>
-        </details>
-        <details open>
-          <summary>Players</summary>
-          <div class="group" id="players-group">
-            <label><span class="lbl">count</span><select id="playerCount">
-              <option value="1">1</option>
-              <option value="2">2</option>
-              <option value="3">3</option>
-              <option value="4" selected>4</option>
-            </select></label>
-            <div id="player-slots"></div>
-            <label><span class="lbl">viewer</span><select id="viewerSelect"></select></label>
-            <button id="players-apply" type="button">Apply / Regen</button>
           </div>
         </details>
         <details>
@@ -593,48 +1146,11 @@
           </div>
         </details>
       </div>
-    </div>
-    <div id="bottom-bar">
-      <div id="resource-hud" aria-label="resources"></div>
-      <button id="trade-toggle" type="button" aria-label="bank trade">Trade</button>
-    </div>
-    <div id="player-strip" aria-label="players"></div>
-    <div id="resource-fx" aria-hidden="true"></div>
-    <div id="prematch-backdrop" class="modal-backdrop hidden" role="dialog" aria-modal="true">
-      <div id="prematch-panel">
-        <h3>Roll for first turn — best of 3</h3>
-        <div id="prematch-rows"></div>
-        <div class="actions">
-          <button id="prematch-roll" class="primary" type="button">Roll</button>
-          <button id="prematch-tiebreak" type="button" style="display:none">Re-roll tied</button>
-          <button id="prematch-start" class="primary" type="button" style="display:none">Start Game</button>
-        </div>
-      </div>
-    </div>
-    <div id="passives-panel" class="hidden" aria-label="trade passives"></div>
-    <div id="trade-backdrop" class="hidden" role="dialog" aria-modal="true" aria-label="bank trade">
-      <div id="trade-panel">
-        <h3>Bank Trade</h3>
-        <div class="sub">Pick cards to give, then a resource to receive. Better rates apply when you own ports.</div>
-        <div class="trade-section">
-          <div class="section-label">Give</div>
-          <div class="trade-row" id="trade-give"></div>
-          <div class="trade-summary" id="trade-summary">Pick what to give.</div>
-        </div>
-        <div class="arrow">↓</div>
-        <div class="trade-section">
-          <div class="section-label">Get</div>
-          <div class="trade-row" id="trade-get"></div>
-        </div>
-        <div class="actions">
-          <button id="trade-reset" type="button">Reset</button>
-          <button id="trade-cancel" type="button">Cancel</button>
-          <button id="trade-confirm" type="button" disabled>Trade</button>
-        </div>
-      </div>
-    </div>
+    </aside>
+
     <script>
       (() => {
+        // Gameplay HUD show/hide
         const t = document.getElementById("hud-toggle");
         const p = document.getElementById("hud-panel");
         t.addEventListener("click", () => {
@@ -642,6 +1158,12 @@
           t.setAttribute("aria-expanded", String(!hidden));
           t.textContent = hidden ? "controls ▸" : "controls ▾";
         });
+        // Dev drawer toggle
+        const devBtn = document.getElementById("dev-toggle");
+        const devDrawer = document.getElementById("dev-drawer");
+        const devClose = document.getElementById("dev-close");
+        devBtn.addEventListener("click", () => devDrawer.classList.toggle("hidden"));
+        devClose.addEventListener("click", () => devDrawer.classList.add("hidden"));
       })();
     </script>
     <script type="module" src="/src/main.ts"></script>
