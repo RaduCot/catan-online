@@ -1,9 +1,14 @@
 import { Board } from "../board";
 
 // Dice roll overlay. Screen-space panel with two tumbling dice and the total.
-export const DICE_ROLL_DURATION = 0.9;
-export const DICE_SETTLE_DURATION = 0.5;
-export const DICE_FADE_DURATION = 1.0; // seconds — panel fades out after settling, then dismisses
+export const DICE_ROLL_DURATION = 1.5;  // tick-cycle phase
+export const DICE_SETTLE_DURATION = 0.4; // landing ease
+export const DICE_HOLD_DURATION = 0.9;   // hold the landed pose before fading
+export const DICE_FADE_DURATION = 0.45;  // fade out
+// Offset (seconds) after dice.startT when post-dice effects fire: number pop
+// on matching tiles, tile sheen, resource fly-out. Sits past the full dice
+// lifecycle plus a small buffer so nothing competes with the dice on screen.
+export const POST_DICE_START = DICE_ROLL_DURATION + DICE_SETTLE_DURATION + DICE_HOLD_DURATION + DICE_FADE_DURATION + 0.15;
 
 export type DiceState = {
   visible: boolean;
@@ -40,7 +45,7 @@ export function tileNumberPopScale(i: number, now: number): number {
   if (!dice.matchOrder.length) return 1;
   const rank = dice.matchOrder.indexOf(i);
   if (rank < 0) return 1;
-  const popStartSec = dice.startT / 1000 + DICE_ROLL_DURATION + DICE_SETTLE_DURATION;
+  const popStartSec = dice.startT / 1000 + POST_DICE_START;
   const t = now / 1000 - popStartSec - rank * HIT_POP_STAGGER;
   if (t <= 0 || t >= HIT_POP_DURATION) return 1;
   // 1 → ~1.6 (peak around 0.5) → 1, with a small bounce on the way down
@@ -52,7 +57,7 @@ export function tileNumberPopScale(i: number, now: number): number {
 
 export function matchPopAnimationRunning(now: number) {
   if (!dice.matchOrder.length) return false;
-  const popStartSec = dice.startT / 1000 + DICE_ROLL_DURATION + DICE_SETTLE_DURATION;
+  const popStartSec = dice.startT / 1000 + POST_DICE_START;
   const popEndSec = popStartSec + dice.matchOrder.length * HIT_POP_STAGGER + HIT_POP_DURATION;
   return now / 1000 < popEndSec + 0.05;
 }
@@ -60,7 +65,7 @@ export function matchPopAnimationRunning(now: number) {
 export function diceAnimationRunning(now: number) {
   if (!dice.visible) return false;
   const elapsed = (now - dice.startT) / 1000;
-  if (elapsed > DICE_ROLL_DURATION + DICE_SETTLE_DURATION + DICE_FADE_DURATION) {
+  if (elapsed > DICE_ROLL_DURATION + DICE_SETTLE_DURATION + DICE_HOLD_DURATION + DICE_FADE_DURATION) {
     dice.visible = false;
     return true; // one more frame so the panel clears
   }

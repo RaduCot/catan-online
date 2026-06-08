@@ -65,11 +65,14 @@ import {
   getBankTradeRule,
   setBankTradeRule,
   setRuleGuaranteed68,
+  setRuleLinkedOpening,
+  getRuleThiefSparesCaster,
+  setRuleThiefSparesCaster,
   reshuffleFor68Rule,
   tradeRateFor,
   ownedPortTypes,
 } from "./game/trade-rules";
-import { defaultThievesIdx, getThievesTileIdx, setThievesTileIdx } from "./game/thieves";
+import { defaultThievesIdx, getThievesTileIdx, setThievesTileIdx, eligibleVictimsFor } from "./game/thieves";
 import {
   initPlayers,
   getPlayers,
@@ -91,7 +94,14 @@ import {
   markDiceRolled,
   resetTurnState,
   currentBuilderId,
+  startDiscardPhase,
+  getDiscardCurrent,
+  discardOne,
+  startRobberMovePhase,
+  startRobberStealPhase,
+  finishRobber,
 } from "./game/turn";
+import { POST_DICE_START } from "./animation/dice";
 import {
   startPreMatch,
   recordRoll,
@@ -99,7 +109,8 @@ import {
   resolveTurnOrder,
   getCurrentRollerId,
   getRolls,
-  getSums,
+  getRoundWins,
+  getRoundWinnerMap,
 } from "./game/pre-match";
 
 async function main() {
@@ -114,6 +125,8 @@ async function main() {
   const ruleAllVisibleInput = document.getElementById("ruleAllVisible") as HTMLInputElement;
   const ruleFogOfWarInput = document.getElementById("ruleFogOfWar") as HTMLInputElement;
   const ruleGuaranteed68Input = document.getElementById("ruleGuaranteed68") as HTMLInputElement;
+  const ruleLinkedOpeningInput = document.getElementById("ruleLinkedOpening") as HTMLInputElement;
+  const ruleThiefSparesCasterInput = document.getElementById("ruleThiefSparesCaster") as HTMLInputElement;
   const rollBtn = document.getElementById("roll-toggle") as HTMLButtonElement;
   const endTurnBtn = document.getElementById("end-turn-btn") as HTMLButtonElement;
   const startMatchBtn = document.getElementById("start-match-btn") as HTMLButtonElement;
@@ -190,13 +203,19 @@ async function main() {
   const regenBtn = document.getElementById("regen") as HTMLButtonElement;
   const playerCountSelect = document.getElementById("playerCount") as HTMLSelectElement;
   const playerSlotsDiv = document.getElementById("player-slots") as HTMLDivElement;
-  const viewerSelect = document.getElementById("viewerSelect") as HTMLSelectElement;
   const playersApplyBtn = document.getElementById("players-apply") as HTMLButtonElement;
   const playerStrip = document.getElementById("player-strip") as HTMLDivElement;
   const prematchBackdrop = document.getElementById("prematch-backdrop") as HTMLDivElement;
   const prematchRows = document.getElementById("prematch-rows") as HTMLDivElement;
   const prematchRollBtn = document.getElementById("prematch-roll") as HTMLButtonElement;
   const actionPromptEl = document.getElementById("action-prompt") as HTMLDivElement | null;
+  const discardBackdrop = document.getElementById("discard-backdrop") as HTMLDivElement | null;
+  const discardHeader = document.getElementById("discard-header") as HTMLDivElement | null;
+  const discardSub = document.getElementById("discard-sub") as HTMLDivElement | null;
+  const discardRow = document.getElementById("discard-row") as HTMLDivElement | null;
+  const discardCounter = document.getElementById("discard-counter") as HTMLDivElement | null;
+  const stealBackdrop = document.getElementById("steal-backdrop") as HTMLDivElement | null;
+  const stealOptions = document.getElementById("steal-options") as HTMLDivElement | null;
 
   const images = await loadImages();
   const portIcons = await loadPortIcons();
@@ -375,6 +394,11 @@ async function main() {
         && tileRevealProgress(thievesTileIdx, performance.now(), board.tiles.length) >= 1)
         ? axialToPixel(board.tiles[thievesTileIdx], layout)
         : null,
+      thievesTileIdx,
+      robberMoveActive: getPhase() === "robber-move",
+      robberMoveValidTiles: getPhase() === "robber-move"
+        ? new Set(board.tiles.map((_, i) => i).filter((i) => i !== thievesTileIdx))
+        : undefined,
       // Fog mode hides opponents' pieces until the viewer has explored a tile
       // they touch. Other modes render every piece.
       ...(getRevealMode() === "fog"
@@ -440,7 +464,9 @@ async function main() {
     // Watch for end-of-dice transition: while dice are visible but animation
     // settled, advance roll → main once.
     if (diceJustFinished(t)) {
-      markDiceRolled();
+      // On a 7 the roll handler owns the transition (discard → robber-move).
+      // Skip the auto roll→main flip so the UI doesn't briefly show main.
+      if (!sevenPending) markDiceRolled();
       refreshTopButtons();
       needsRender = true;
     }
@@ -541,6 +567,190 @@ async function main() {
     return finished;
   }
 
+  // ---------- Robber-on-7 sequence ----------
+  // sevenPending is true between the dice roll and the post-dice transition;
+  // it gates the diceJustFinished hook so the auto roll→main flip is skipped
+  // for sevens.
+  let sevenPending = false;
+
+  function handTotal(playerId: number): number {
+    const hand = resourceCounts[playerId];
+    if (!hand) return 0;
+    let t = 0;
+    for (const r of RESOURCE_ORDER) t += hand[r];
+    return t;
+  }
+
+  function triggerSevenSequence() {
+    // Players (in turn order) holding > 7 cards owe floor(total/2). The
+    // "thief spares roller" house rule exempts the active player (the one
+    // who rolled the 7) from the discard penalty — they still move the
+    // robber and steal as normal.
+    const order = getPlayers().map((p) => p.id);
+    const rollerId = getActivePlayerId();
+    const sparesCaster = getRuleThiefSparesCaster();
+    const amounts = new Map<number, number>();
+    const owers: number[] = [];
+    for (const pid of order) {
+      if (sparesCaster && pid === rollerId) continue;
+      const total = handTotal(pid);
+      if (total > 7) {
+        amounts.set(pid, Math.floor(total / 2));
+        owers.push(pid);
+      }
+    }
+    if (owers.length) {
+      startDiscardPhase(owers, amounts);
+      openDiscardModal();
+    } else {
+      startRobberMovePhase();
+    }
+    refreshTopButtons();
+    render();
+  }
+
+  function openDiscardModal() {
+    if (!discardBackdrop) return;
+    discardBackdrop.classList.remove("hidden");
+    renderDiscardModal();
+  }
+  function closeDiscardModal() {
+    if (!discardBackdrop) return;
+    discardBackdrop.classList.add("hidden");
+  }
+
+  function renderDiscardModal() {
+    if (!discardBackdrop || !discardRow || !discardHeader || !discardSub || !discardCounter) return;
+    const cur = getDiscardCurrent();
+    if (!cur) { closeDiscardModal(); return; }
+    const player = getPlayers().find((p) => p.id === cur.playerId);
+    const owedTotal = Math.floor(handTotal(cur.playerId) / 2) + 0; // for label fallback
+    const initial = cur.remaining; // remaining acts as both target & countdown — display N as current owed
+    void owedTotal;
+    discardHeader.textContent = `Discard ${cur.remaining} card${cur.remaining === 1 ? "" : "s"}`;
+    discardSub.textContent = `${player?.name ?? `P${cur.playerId + 1}`} — pick the cards to lose.`;
+    discardCounter.textContent = `Left: ${cur.remaining}`;
+    discardRow.innerHTML = "";
+    const hand = resourceCounts[cur.playerId];
+    for (const k of RESOURCE_ORDER) {
+      const btn = document.createElement("button");
+      btn.className = "trade-btn";
+      btn.type = "button";
+      btn.dataset.res = k;
+      btn.title = RESOURCE_LABELS[k];
+      const img = document.createElement("img");
+      img.src = RESOURCE_ICONS[k];
+      img.alt = "";
+      img.draggable = false;
+      btn.appendChild(img);
+      const stock = document.createElement("span");
+      stock.className = "stock";
+      const count = hand ? hand[k] : 0;
+      stock.textContent = String(count);
+      btn.appendChild(stock);
+      btn.disabled = !hand || count <= 0;
+      btn.addEventListener("click", () => {
+        if (btn.disabled) return;
+        const h = resourceCounts[cur.playerId];
+        if (!h || h[k] <= 0) return;
+        h[k] = h[k] - 1;
+        discardOne();
+        if (cur.playerId === getViewerPlayerId()) renderResourceHud(cur.playerId);
+        refreshPlayerStrip();
+        const next = getDiscardCurrent();
+        if (!next) {
+          closeDiscardModal();
+          // Queue empty — startDiscardPhase already auto-transitioned to
+          // robber-move via discardOne, so just refresh the prompt.
+          refreshTopButtons();
+          render();
+        } else {
+          renderDiscardModal();
+          refreshTopButtons();
+          render();
+        }
+      });
+      discardRow.appendChild(btn);
+    }
+    void initial;
+  }
+
+  function openStealModal(victims: number[], onPick: (victimId: number) => void) {
+    if (!stealBackdrop || !stealOptions) {
+      // Fallback: pick the first victim if the modal isn't present.
+      if (victims.length) onPick(victims[0]);
+      return;
+    }
+    stealOptions.innerHTML = "";
+    for (const vid of victims) {
+      const player = getPlayers().find((p) => p.id === vid);
+      const total = handTotal(vid);
+      const btn = document.createElement("button");
+      btn.className = "steal-option";
+      btn.type = "button";
+      const sw = document.createElement("span");
+      sw.className = "swatch";
+      sw.style.background = player?.color ?? "#888";
+      const name = document.createElement("span");
+      name.className = "name";
+      name.textContent = player?.name ?? `P${vid + 1}`;
+      const cards = document.createElement("span");
+      cards.className = "cards";
+      cards.textContent = `${total} card${total === 1 ? "" : "s"}`;
+      btn.appendChild(sw);
+      btn.appendChild(name);
+      btn.appendChild(cards);
+      btn.addEventListener("click", () => {
+        stealBackdrop.classList.add("hidden");
+        onPick(vid);
+      });
+      stealOptions.appendChild(btn);
+    }
+    stealBackdrop.classList.remove("hidden");
+  }
+
+  // Resolve the steal after the robber moved. Called from canvas click handler.
+  function resolveSteal() {
+    const robberId = getActivePlayerId();
+    const tileIdx = getThievesTileIdx();
+    const layout = fitLayout(board, canvas.clientWidth, canvas.clientHeight);
+    const victims = eligibleVictimsFor(tileIdx, robberId, board, layout, (id) => handTotal(id) > 0);
+    const robberName = getPlayers().find((p) => p.id === robberId)?.name ?? `P${robberId + 1}`;
+    const doSteal = (victimId: number) => {
+      const vHand = resourceCounts[victimId];
+      const tHand = resourceCounts[robberId];
+      if (!vHand || !tHand) { finishRobber(); refreshTopButtons(); render(); return; }
+      const candidates: ResourceKind[] = [];
+      for (const k of RESOURCE_ORDER) for (let i = 0; i < vHand[k]; i++) candidates.push(k);
+      if (!candidates.length) { finishRobber(); refreshTopButtons(); render(); return; }
+      const picked = candidates[Math.floor(Math.random() * candidates.length)];
+      vHand[picked] = Math.max(0, vHand[picked] - 1);
+      tHand[picked] = tHand[picked] + 1;
+      const victimName = getPlayers().find((p) => p.id === victimId)?.name ?? `P${victimId + 1}`;
+      showActionPrompt(`${robberName} stole a ${RESOURCE_LABELS[picked].toLowerCase()} from ${victimName}!`);
+      renderResourceHud(getViewerPlayerId());
+      refreshPlayerStrip();
+      finishRobber();
+      refreshTopButtons();
+      render();
+    };
+    if (victims.length === 0) {
+      showActionPrompt("No one to steal from.");
+      finishRobber();
+      refreshTopButtons();
+      render();
+      return;
+    }
+    if (victims.length === 1) {
+      doSteal(victims[0]);
+      return;
+    }
+    startRobberStealPhase();
+    refreshTopButtons();
+    render();
+    openStealModal(victims, doSteal);
+  }
+
   function resetSharedReveal() {
     rebuildRevealOrders(board);
     reveal.animStart = performance.now();
@@ -562,6 +772,9 @@ async function main() {
     setThievesTileIdx(defaultThievesIdx(board));
     resetSharedReveal();
     resetTurnState();
+    sevenPending = false;
+    if (discardBackdrop) discardBackdrop.classList.add("hidden");
+    if (stealBackdrop) stealBackdrop.classList.add("hidden");
     refreshPassivesAndTrade();
     refreshPlayerStrip();
     refreshTopButtons();
@@ -650,12 +863,28 @@ async function main() {
   mapStyleSelect.addEventListener("change", regen);
   imgScaleInput.addEventListener("input", render);
   rollBtn.addEventListener("click", () => {
-    if (getPhase() !== "roll") return;
+    if (getPhase() !== "roll" || rollBtn.disabled) return;
+    // Disable the button for the full dice animation. Phase stays "roll" so
+    // End Turn / Trade don't appear yet (that flip happens via the tick's
+    // diceJustFinished hook when the dice settle and fade). This prevents
+    // both spamming rolls AND accidentally clicking End Turn mid-animation.
+    rollBtn.disabled = true;
     rollDice(board);
+    const sum = dice.dice[0] + dice.dice[1];
     const layout = fitLayout(board, canvas.clientWidth, canvas.clientHeight);
-    // Dice yields credit each building's owner; only the viewer's gains fly.
-    scheduleRollYields(board, layout, view, canvas);
-    refreshTopButtons();
+    if (sum === 7) {
+      // No yields on a 7. The robber sequence is driven by the roll handler
+      // itself (the tick hook skips markDiceRolled while sevenPending is set)
+      // so the discard / robber-move transition happens after the dice fade.
+      sevenPending = true;
+      setTimeout(() => {
+        sevenPending = false;
+        triggerSevenSequence();
+      }, POST_DICE_START * 1000);
+    } else {
+      // Dice yields credit each building's owner; only the viewer's gains fly.
+      scheduleRollYields(board, layout, view, canvas);
+    }
     render();
   });
   endTurnBtn.addEventListener("click", () => {
@@ -684,8 +913,33 @@ async function main() {
     if (getRevealMode() === "default" && revealAnimationRunning(performance.now(), board.tiles.length)) return;
     // Phase gating: only opening + main allow placement, and only when the
     // viewer is the active builder (in opening, the builder follows the snake
-    // pointer, not the active id).
+    // pointer, not the active id). Robber-move has its own click branch below.
     const phase = getPhase();
+    if (phase === "robber-move" && currentBuilderId() === getActivePlayerId() && getActivePlayerId() === getViewerPlayerId()) {
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const wx = (mx - view.tx) / view.zoom;
+      const wy = (my - view.ty) / view.zoom;
+      const layout = fitLayout(board, canvas.clientWidth, canvas.clientHeight);
+      // Snap to closest tile center within the inradius (the largest distance
+      // that's strictly inside the hex from its center).
+      const r2Limit = (layout.size * Math.sqrt(3) / 2) ** 2;
+      let bestIdx = -1;
+      let bestD2 = Infinity;
+      for (let i = 0; i < board.tiles.length; i++) {
+        const { x, y } = axialToPixel(board.tiles[i], layout);
+        const dx = wx - x;
+        const dy = wy - y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < bestD2) { bestD2 = d2; bestIdx = i; }
+      }
+      if (bestIdx < 0 || bestD2 > r2Limit) return;
+      if (bestIdx === getThievesTileIdx()) return; // robber must move
+      setThievesTileIdx(bestIdx);
+      resolveSteal();
+      return;
+    }
     if (phase !== "opening" && phase !== "main") return;
     if (currentBuilderId() !== getViewerPlayerId()) return;
     const rect = canvas.getBoundingClientRect();
@@ -736,12 +990,23 @@ async function main() {
         if (phase === "opening") openingAdvance();
         const stillOpening = getPhase() === "opening";
         if (stillOpening) {
+          // Hot-seat: sync the viewer to whoever's up next so the new
+          // player sees their own perspective immediately.
+          setViewerPlayerId(currentBuilderId());
+          renderResourceHud(getViewerPlayerId());
           // Next player's S1.
           setPlacementStep("initial-s1");
           setLastInitialSettlementKey(null);
         } else {
           setPlacementStep("free");
           setLastInitialSettlementKey(null);
+          // Opening just ended — openingAdvance set the active player to
+          // turnOrder[0] (first to roll). Snap the viewer to them too so the
+          // hot-seat passes the controls correctly: the first roller sees
+          // their own hand and the Roll button (which gates on viewer ===
+          // active) becomes available.
+          setViewerPlayerId(getActivePlayerId());
+          renderResourceHud(getViewerPlayerId());
           // Opening complete — reshuffle chance numbers to honour the
           // guaranteed-6/8 rule (no-op if the rule is off). Done before the
           // reveal kicks in so the staggered flip shows the new numbers.
@@ -1100,6 +1365,13 @@ async function main() {
     setRuleGuaranteed68(ruleGuaranteed68Input.checked);
     render();
   });
+  ruleLinkedOpeningInput.addEventListener("change", () => {
+    setRuleLinkedOpening(ruleLinkedOpeningInput.checked);
+    render();
+  });
+  ruleThiefSparesCasterInput.addEventListener("change", () => {
+    setRuleThiefSparesCaster(ruleThiefSparesCasterInput.checked);
+  });
 
   function renderPassives() {
     const ports = currentPorts();
@@ -1133,37 +1405,19 @@ async function main() {
   renderPassives();
 
   // --- Player strip badges + viewer select ---
-  function rebuildViewerSelect() {
-    viewerSelect.innerHTML = "";
-    for (const p of getPlayers()) {
-      const opt = document.createElement("option");
-      opt.value = String(p.id);
-      opt.textContent = `${p.name} (P${p.id + 1})`;
-      viewerSelect.appendChild(opt);
-    }
-    viewerSelect.value = String(getViewerPlayerId());
-  }
-  viewerSelect.addEventListener("change", () => {
-    const id = Number(viewerSelect.value) || 0;
-    setViewerPlayerId(id);
-    renderResourceHud(id);
-    refreshPlayerStrip();
-    refreshPassivesAndTrade();
-    render();
-  });
-
   refreshPlayerStrip = () => {
     playerStrip.innerHTML = "";
-    const activeId = getActivePlayerId();
+    const phase = getPhase();
+    const activeId = phase === "opening" ? currentBuilderId() : getActivePlayerId();
     const viewerId = getViewerPlayerId();
     for (const p of getPlayers()) {
-      const badge = document.createElement("div");
-      badge.className = "pbadge";
-      if (p.id === activeId) badge.classList.add("active");
-      if (p.id === viewerId) badge.classList.add("viewer");
-      const sw = document.createElement("span");
-      sw.className = "swatch";
-      sw.style.background = p.color;
+      const chip = document.createElement("div");
+      chip.className = "pchip";
+      if (p.id === activeId && phase !== "pre-match") chip.classList.add("active");
+      if (p.id === viewerId && p.id !== activeId) chip.classList.add("viewer");
+      const stripe = document.createElement("span");
+      stripe.className = "stripe";
+      stripe.style.background = p.color;
       const name = document.createElement("span");
       name.className = "pname";
       name.textContent = p.name;
@@ -1172,19 +1426,11 @@ async function main() {
       const hand = resourceCounts[p.id];
       let total = 0;
       if (hand) for (const r of RESOURCE_ORDER) total += hand[r];
-      cards.textContent = `${total}🂠`;
-      badge.appendChild(sw);
-      badge.appendChild(name);
-      badge.appendChild(cards);
-      badge.addEventListener("click", () => {
-        setViewerPlayerId(p.id);
-        renderResourceHud(p.id);
-        refreshPlayerStrip();
-        refreshPassivesAndTrade();
-        viewerSelect.value = String(p.id);
-        render();
-      });
-      playerStrip.appendChild(badge);
+      cards.textContent = String(total);
+      chip.appendChild(stripe);
+      chip.appendChild(name);
+      chip.appendChild(cards);
+      playerStrip.appendChild(chip);
     }
   };
 
@@ -1214,12 +1460,27 @@ async function main() {
 
   refreshTopButtons = () => {
     const phase = getPhase();
-    rollBtn.disabled = phase !== "roll";
-    endTurnBtn.disabled = phase !== "main";
-    tradeToggleBtn.disabled = !(phase === "main" && getActivePlayerId() === getViewerPlayerId());
-    // Start-match is only available pre-match (sandbox). Once the match is
-    // running, hide it so the player can't kick off a duplicate pre-match.
+    const myTurn = getActivePlayerId() === getViewerPlayerId();
+    // Contextual bottom-bar actions. They share the right-of-HUD slot so the
+    // player's eye lands on the same spot every turn. Trade hides during the
+    // roll phase (you can't trade before rolling) — Roll takes its place;
+    // during main, Trade rejoins End Turn.
     startMatchBtn.style.display = phase === "pre-match" ? "" : "none";
+    const rollVisible = phase === "roll" && myTurn;
+    rollBtn.style.display = rollVisible ? "" : "none";
+    // Reset the disabled flag whenever the button (re)enters the visible
+    // state — the click handler flips it true during the dice animation
+    // to gate spamming, and we need it cleared for the next turn.
+    if (rollVisible) rollBtn.disabled = false;
+    // Action buttons hide during all robber sub-phases — the player's only
+    // affordance is the modal / canvas click for that flow. Both `display`
+    // AND `disabled` are toggled defensively so a stale style can't make
+    // the button clickable mid-robber.
+    const mainTurn = phase === "main" && myTurn;
+    endTurnBtn.style.display = mainTurn ? "" : "none";
+    endTurnBtn.disabled = !mainTurn;
+    tradeToggleBtn.style.display = mainTurn ? "" : "none";
+    tradeToggleBtn.disabled = !mainTurn;
     // Match status pill: derive a human-readable phase + active player label.
     const players = getPlayers();
     const activeId = phase === "opening" ? currentBuilderId() : getActivePlayerId();
@@ -1237,6 +1498,14 @@ async function main() {
       statusText = `${tag} to roll`;
     } else if (phase === "main") {
       statusText = `${tag} — main`;
+    } else if (phase === "discard") {
+      const cur = getDiscardCurrent();
+      const dPlayer = cur ? players.find((p) => p.id === cur.playerId) : undefined;
+      statusText = cur ? `${dPlayer?.name ?? `P${cur.playerId + 1}`} discarding (${cur.remaining})` : "Discarding";
+    } else if (phase === "robber-move") {
+      statusText = `${tag} — move the robber`;
+    } else if (phase === "robber-steal") {
+      statusText = `${tag} — pick a victim`;
     }
     if (matchStatusEl) matchStatusEl.textContent = statusText;
 
@@ -1251,6 +1520,22 @@ async function main() {
       showActionPrompt(`${tag} — roll the dice!`);
     } else if (phaseChanged && phase === "main") {
       showActionPrompt(`${tag} — trade or build`);
+    } else if (phase === "discard") {
+      const cur = getDiscardCurrent();
+      if (cur) {
+        const dp = players.find((p) => p.id === cur.playerId);
+        const dn = dp?.name ?? `P${cur.playerId + 1}`;
+        if (cur.playerId === getViewerPlayerId()) {
+          showActionPrompt(`${dn} — discard ${cur.remaining} card${cur.remaining === 1 ? "" : "s"}`);
+        } else {
+          showActionPrompt(`${dn} is discarding — waiting...`);
+        }
+      }
+    } else if (phaseChanged && phase === "robber-move") {
+      if (activeId === getViewerPlayerId()) showActionPrompt(`${tag} — move the robber`);
+      else showActionPrompt(`${tag} is moving the robber...`);
+    } else if (phaseChanged && phase === "robber-steal") {
+      if (activeId === getViewerPlayerId()) showActionPrompt(`${tag} — pick a victim`);
     } else if (phase === "opening" && (activeChanged || stepChanged)) {
       if (step === "initial-s1") showActionPrompt(`${tag} — place your first settlement`);
       else if (step === "initial-b1") showActionPrompt(`${tag} — place your first road`);
@@ -1270,33 +1555,44 @@ async function main() {
   function renderPreMatchRows() {
     prematchRows.innerHTML = "";
     const rolls = getRolls();
-    const sums = getSums();
+    const wins = getRoundWins();
+    const winMap = getRoundWinnerMap();
     const currentId = getCurrentRollerId();
+    const complete = preMatchComplete();
     for (const p of getPlayers()) {
       const row = document.createElement("div");
       row.className = "row";
-      if (p.id === currentId && !preMatchComplete()) row.classList.add("active");
+      if (p.id === currentId && !complete) row.classList.add("active");
       const sw = document.createElement("span");
       sw.className = "swatch";
       sw.style.background = p.color;
       const name = document.createElement("span");
       name.className = "name";
       name.textContent = p.name;
-      const r = document.createElement("span");
-      r.className = "rolls";
-      r.textContent = `Rolls: ${(rolls[p.id] ?? []).length} / 3`;
-      const sumEl = document.createElement("span");
-      sumEl.className = "sum";
-      sumEl.textContent = String(sums.find((s) => s.id === p.id)?.sum ?? 0);
+      // Per-round chips show each roll's sum; the chip is gold if that
+      // player strictly won that round.
+      const chips = document.createElement("span");
+      chips.className = "rolls";
+      const myRolls = rolls[p.id] ?? [];
+      const myWins = winMap[p.id] ?? [];
+      const chipParts: string[] = [];
+      for (let r = 0; r < myRolls.length; r++) {
+        const cls = myWins[r] ? "rc win" : "rc";
+        chipParts.push(`<span class="${cls}">${myRolls[r]}</span>`);
+      }
+      chips.innerHTML = chipParts.join("");
+      const winsEl = document.createElement("span");
+      winsEl.className = "sum";
+      winsEl.textContent = String(wins[p.id] ?? 0);
       row.appendChild(sw);
       row.appendChild(name);
-      row.appendChild(r);
-      row.appendChild(sumEl);
+      row.appendChild(chips);
+      row.appendChild(winsEl);
       prematchRows.appendChild(row);
     }
-    // The roll button hides once the modal has captured all rolls. The match
+    // The roll button hides once the match has a clear winner. The match
     // auto-starts from inside the roll handler, so no Start / Tiebreak UI.
-    prematchRollBtn.style.display = preMatchComplete() ? "none" : "";
+    prematchRollBtn.style.display = complete ? "none" : "";
   }
   function openPreMatchModal() {
     // 1-player mode skips pre-match — no point rolling against yourself.
@@ -1304,7 +1600,6 @@ async function main() {
       setTurnOrder([0]);
       setPhase("opening");
       setViewerPlayerId(0);
-      viewerSelect.value = "0";
       renderResourceHud(0);
       refreshPlayerStrip();
       refreshTopButtons();
@@ -1324,7 +1619,7 @@ async function main() {
   //   (3) panel fades back in → (4) re-enable button (or auto-start match)
   // Each stage waits for the previous one to fully complete.
   const PANEL_FADE_MS = 260;  // matches the CSS .rolling transition
-  const DICE_LIFE_MS = (0.9 + 0.5 + 1.0) * 1000; // roll + settle + fade
+  const DICE_LIFE_MS = (1.5 + 0.4 + 0.9 + 0.45) * 1000; // roll + settle + hold + fade
   function commitPreMatchRoll(sum: number) {
     recordRoll(sum);
     renderPreMatchRows();
@@ -1336,7 +1631,6 @@ async function main() {
         setTurnOrder(order);
         setPhase("opening");
         setViewerPlayerId(order[0]);
-        viewerSelect.value = String(order[0]);
         renderResourceHud(order[0]);
         closePreMatchModal();
         refreshPlayerStrip();
@@ -1370,11 +1664,9 @@ async function main() {
   playersApplyBtn.addEventListener("click", () => {
     const n = Number(playerCountSelect.value) || 2;
     initPlayers(n, slotColors, slotNames);
-    rebuildViewerSelect();
     regen();
   });
 
-  rebuildViewerSelect();
   refreshPlayerStrip();
   refreshTopButtons();
 

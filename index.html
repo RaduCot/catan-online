@@ -150,15 +150,10 @@
       }
 
       /* =====================================================================
-       * GAMEPLAY — top action bar (status + actions)
+       * GAMEPLAY — top-left match status (single pill, no button cluster)
        * ===================================================================== */
       #hud {
         position: fixed; top: 12px; left: 12px; z-index: 10;
-        display: flex; flex-direction: column; gap: 10px; align-items: flex-start;
-        max-width: min(360px, 32vw);
-      }
-      #top-actions {
-        display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
       }
       #match-status {
         background: var(--surface-1);
@@ -176,7 +171,11 @@
        * transitions ("Match started!", "P2 — roll the dice!"). Auto-fades
        * after a few seconds; replaced immediately on the next transition. */
       #action-prompt {
-        position: fixed; top: 18px; left: 50%;
+        position: fixed;
+        /* Sits below the top-centred player strip so they don't fight for
+         * the same vertical band — player chips are ~40px tall at top 14px. */
+        top: 78px;
+        left: 50%;
         transform: translate(-50%, -10px) scale(0.94);
         z-index: 60;
         background: linear-gradient(180deg, var(--accent-gold) 0%, var(--accent-gold-dim) 100%);
@@ -200,6 +199,37 @@
       #action-prompt.visible {
         opacity: 1;
         transform: translate(-50%, 0) scale(1);
+      }
+
+      /* =====================================================================
+       * GAMEPLAY — bottom-bar action buttons (inline with resource HUD)
+       *
+       * Action buttons (start match / roll / end turn / trade) all share
+       * the same pill shape as the Trade button and live in the bottom
+       * bar. Only contextually relevant ones are displayed: roll replaces
+       * trade during the roll phase, end-turn appears alongside trade
+       * during main, start-match appears solo in pre-match. Same spot,
+       * different action — the player's eye doesn't have to hunt.
+       * ===================================================================== */
+      .action-btn {
+        background: linear-gradient(180deg, var(--accent-gold), var(--accent-gold-dim));
+        color: #2a1b0e;
+        border-radius: var(--r-pill);
+        padding: 0 22px;
+        font-family: var(--font-display);
+        font-size: 14px; font-weight: 900; letter-spacing: 0.08em;
+        text-transform: uppercase;
+        box-shadow: var(--shadow-card), var(--shadow-inset);
+        transition: transform 0.18s var(--ease-bounce), box-shadow 0.2s;
+      }
+      .action-btn:hover:not(:disabled) {
+        transform: translateY(-2px) scale(1.04);
+        box-shadow: var(--shadow-lift), var(--shadow-inset);
+      }
+      .action-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+      .action-btn.confirm {
+        background: linear-gradient(180deg, #5ec98a, var(--accent-forest));
+        color: #fff;
       }
 
       /* gameplay action buttons — rounded rectangles (grounded, not pill) */
@@ -257,6 +287,33 @@
         width: 320px;
       }
       #hud-panel.hidden { display: none; }
+      #hud-panel.collapsed > #panel-body { display: none; }
+      #hud-panel.collapsed { padding-bottom: 10px; }
+      #panel-header {
+        display: flex; align-items: center; justify-content: space-between;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--surface-line);
+      }
+      #panel-header h4 {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--surface-ink-soft);
+      }
+      .panel-actions { display: flex; gap: 6px; }
+      .panel-icon-btn {
+        background: var(--surface-2);
+        color: var(--surface-ink);
+        border-radius: 8px;
+        padding: 4px 8px;
+        font-size: 13px;
+        font-weight: 800;
+        transition: background 0.15s var(--ease-soft), transform 0.15s var(--ease-bounce);
+      }
+      .panel-icon-btn:hover { background: var(--surface-3); transform: translateY(-1px); }
+      .panel-icon-btn.danger { color: var(--accent-terracotta); }
       #hud-panel details {
         border-top: 1px solid var(--surface-line);
         padding: 4px 0;
@@ -393,8 +450,18 @@
       #bottom-bar {
         position: fixed; bottom: 18px; left: 50%;
         transform: translateX(-50%);
-        z-index: 10; display: flex; gap: 12px; align-items: stretch;
+        z-index: 10;
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        align-items: stretch;
+        gap: 12px;
+        /* 1fr columns mirror each other regardless of how many action
+         * buttons are visible, so the resource HUD stays geometrically
+         * centred even when buttons appear/disappear. align-items:stretch
+         * makes the action-button cells match the HUD's height. */
       }
+      #bottom-bar .actions-left { justify-self: end; display: flex; gap: 8px; align-items: stretch; }
+      #bottom-bar .actions-right { justify-self: start; display: flex; gap: 8px; align-items: stretch; }
       #trade-toggle {
         background: linear-gradient(180deg, var(--accent-gold), var(--accent-gold-dim));
         color: #2a1b0e;
@@ -595,6 +662,84 @@
         opacity: 0.4; cursor: not-allowed;
       }
 
+      /* Robber discard + steal modals — cream/gold consistent with trade. */
+      #discard-panel,
+      #steal-panel {
+        min-width: 420px; max-width: 92vw;
+        background: var(--surface-1);
+        color: var(--surface-ink);
+        border-radius: var(--r-card);
+        padding: 24px 26px 20px;
+        box-shadow: var(--shadow-lift);
+        font-family: var(--font-display);
+        font-size: 13px;
+        animation: modal-pop 0.32s var(--ease-bounce);
+      }
+      #discard-panel h3,
+      #steal-panel h3 {
+        margin: 0 0 6px;
+        font-family: var(--font-display);
+        font-size: 22px; font-weight: 900;
+        color: var(--surface-ink);
+        letter-spacing: -0.01em;
+      }
+      #discard-panel .sub,
+      #steal-panel .sub {
+        color: var(--surface-ink-soft);
+        font-size: 13px; margin-bottom: 18px; line-height: 1.45;
+        font-weight: 600;
+      }
+      #discard-panel .trade-row {
+        display: flex; gap: 8px; justify-content: center;
+      }
+      #discard-panel .discard-counter {
+        margin-top: 14px;
+        padding: 10px 14px;
+        background: var(--surface-2);
+        border-radius: var(--r-input);
+        font-size: 13px; color: var(--accent-gold-dim);
+        font-variant-numeric: tabular-nums;
+        font-weight: 800;
+        text-align: center;
+      }
+      #steal-options {
+        display: flex; flex-direction: column; gap: 8px;
+      }
+      .steal-option {
+        display: flex; align-items: center; gap: 14px;
+        padding: 12px 16px;
+        background: var(--surface-2);
+        border: 2px solid transparent;
+        border-radius: var(--r-card);
+        color: var(--surface-ink);
+        box-shadow: var(--shadow-inset);
+        transition: transform 0.18s var(--ease-bounce),
+                    border-color 0.15s,
+                    background 0.15s;
+        cursor: pointer;
+        text-align: left;
+      }
+      .steal-option:hover {
+        transform: translateY(-2px) scale(1.02);
+        border-color: var(--accent-gold);
+        background: var(--surface-3);
+      }
+      .steal-option .swatch {
+        width: 24px; height: 24px;
+        border-radius: 50%;
+        box-shadow: 0 0 0 3px var(--surface-1), 0 0 0 4px rgba(60, 40, 20, 0.2);
+        flex-shrink: 0;
+      }
+      .steal-option .name {
+        flex: 1;
+        font-weight: 800; font-size: 15px;
+      }
+      .steal-option .cards {
+        font-weight: 800;
+        color: var(--accent-gold-dim);
+        font-variant-numeric: tabular-nums;
+      }
+
       /* Pre-match rows — horizontal player cards */
       #prematch-rows {
         display: flex; flex-direction: column; gap: 8px;
@@ -628,10 +773,24 @@
         color: var(--surface-ink);
       }
       #prematch-rows .row .rolls {
+        display: flex; gap: 4px; flex-wrap: wrap;
         color: var(--surface-ink-soft);
-        font-weight: 700; font-size: 12px;
+        font-weight: 800;
         font-variant-numeric: tabular-nums;
-        letter-spacing: 0.04em;
+      }
+      #prematch-rows .row .rolls .rc {
+        display: inline-flex; align-items: center; justify-content: center;
+        min-width: 26px; height: 26px;
+        padding: 0 6px;
+        border-radius: 7px;
+        background: rgba(255, 220, 160, 0.08);
+        color: var(--surface-ink-soft);
+        font-size: 13px;
+      }
+      #prematch-rows .row .rolls .rc.win {
+        background: linear-gradient(180deg, var(--accent-gold), var(--accent-gold-dim));
+        color: #2a1b0e;
+        box-shadow: var(--shadow-inset);
       }
       #prematch-rows .row .sum {
         font-family: var(--font-display);
@@ -645,55 +804,78 @@
       #prematch-rows .row.active .sum { color: var(--surface-ink); }
 
       /* =====================================================================
-       * GAMEPLAY — player strip (top center)
+       * GAMEPLAY — player roster (top center)
+       *
+       * Horizontal "chip" cards laid out in a row. The player's color is a
+       * solid vertical stripe on the left of each chip (the only "round"
+       * thing is the chip's outer corners, not the color blob). Active
+       * player gets a gold inset ring without a scale jump so the row stays
+       * geometrically calm. Viewer ≠ active is marked with a small eye.
        * ===================================================================== */
       #player-strip {
-        position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+        position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
         z-index: 10;
         display: flex; gap: 8px;
+      }
+      .pchip {
+        position: relative;
+        display: grid;
+        grid-template-columns: 6px auto 1fr auto;
+        align-items: center;
+        gap: 10px;
+        min-width: 132px;
+        padding: 7px 12px 7px 0;
         background: var(--surface-1);
-        border-radius: var(--r-pill);
-        padding: 8px 12px;
+        color: var(--surface-ink);
+        border-radius: 10px;
         box-shadow: var(--shadow-card);
-      }
-      #player-strip .pbadge {
-        display: flex; flex-direction: column; align-items: center;
-        gap: 4px;
-        padding: 4px 10px 6px;
-        border-radius: 14px;
-        background: transparent;
         cursor: pointer; user-select: none;
-        font-size: 12px;
-        color: var(--surface-ink);
-        transition: transform 0.2s var(--ease-bounce), background 0.15s;
-        min-width: 60px;
+        transition: box-shadow 0.18s var(--ease-soft),
+                    background 0.15s var(--ease-soft),
+                    transform 0.18s var(--ease-soft);
       }
-      #player-strip .pbadge:hover { background: var(--surface-2); transform: translateY(-2px); }
-      #player-strip .pbadge .swatch {
-        width: 22px; height: 22px;
-        border-radius: 50%;
-        box-shadow: 0 0 0 2px var(--surface-1), 0 0 0 3px rgba(60, 40, 20, 0.18);
+      .pchip:hover { background: var(--surface-3); transform: translateY(-1px); }
+      .pchip .stripe {
+        grid-column: 1;
+        align-self: stretch;
+        width: 6px;
+        border-radius: 10px 0 0 10px;
+        /* color injected inline per player */
       }
-      #player-strip .pbadge.active {
-        transform: scale(1.08);
-        background: var(--surface-2);
-      }
-      #player-strip .pbadge.active .swatch {
-        box-shadow: 0 0 0 2px var(--surface-1), 0 0 0 4px var(--accent-gold);
-      }
-      #player-strip .pbadge.viewer { background: rgba(244, 199, 87, 0.22); }
-      #player-strip .pbadge .pname {
-        font-weight: 800; font-size: 12px;
-        color: var(--surface-ink);
-      }
-      #player-strip .pbadge .pcards {
-        background: var(--surface-ink);
-        color: var(--surface-1);
-        padding: 1px 8px;
-        border-radius: var(--r-pill);
+      .pchip .pname {
+        grid-column: 2;
         font-weight: 800;
-        font-size: 11px;
+        font-size: 13px;
+        letter-spacing: 0.01em;
+        padding-left: 6px;
+      }
+      .pchip .pcards {
+        grid-column: 4;
+        display: inline-flex; align-items: center; gap: 4px;
+        font-weight: 800;
+        font-size: 13px;
+        color: var(--surface-ink);
         font-variant-numeric: tabular-nums;
+      }
+      .pchip .pcards::before {
+        content: "🂠";
+        font-size: 14px;
+        color: var(--surface-ink-soft);
+      }
+      .pchip.active {
+        background: var(--surface-3);
+        box-shadow: var(--shadow-card),
+                    inset 0 0 0 2px var(--accent-gold);
+      }
+      .pchip.viewer::after {
+        content: "👁";
+        position: absolute; top: -8px; right: -6px;
+        background: var(--surface-1);
+        border-radius: 50%;
+        width: 20px; height: 20px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 11px;
+        box-shadow: var(--shadow-card);
       }
 
       /* =====================================================================
@@ -887,16 +1069,9 @@
       <canvas id="board"></canvas>
     </div>
 
-    <!-- ===== GAMEPLAY: top-left status + action bar ===== -->
+    <!-- ===== GAMEPLAY: top-left match status ===== -->
     <div id="hud">
-      <div id="top-actions">
-        <div id="match-status">Sandbox</div>
-        <button id="start-match-btn" class="gp-btn primary" type="button">▶ Start Match</button>
-        <button id="roll-toggle" class="gp-btn" type="button">🎲 Roll</button>
-        <button id="end-turn-btn" class="gp-btn confirm" type="button" disabled>End Turn</button>
-        <button id="restart-toggle" class="gp-btn danger" type="button">↻ Restart</button>
-        <button id="hud-toggle" aria-expanded="true" aria-controls="hud-panel" type="button">controls ▾</button>
-      </div>
+      <div id="match-status">Sandbox</div>
     </div>
 
     <!-- ===== GAMEPLAY: player strip top-center ===== -->
@@ -905,51 +1080,74 @@
     <!-- ===== GAMEPLAY: right column (Match card holding rules/players/map) ===== -->
     <div id="gameplay-right">
       <div id="hud-panel">
-        <details open>
-          <summary>Game Rules</summary>
-          <div class="group">
-            <label><span class="lbl">mixed bank pile</span><input id="ruleMixedTrade" type="checkbox" /></label>
-            <label><span class="lbl">all visible</span><input id="ruleAllVisible" type="checkbox" /></label>
-            <label><span class="lbl">fog of war</span><input id="ruleFogOfWar" type="checkbox" /></label>
-            <label><span class="lbl">guaranteed 6/8</span><input id="ruleGuaranteed68" type="checkbox" /></label>
+        <div id="panel-header">
+          <h4>Match</h4>
+          <div class="panel-actions">
+            <button id="restart-toggle" class="panel-icon-btn danger" type="button" title="Restart match (keep board)">↻</button>
+            <button id="hud-toggle" class="panel-icon-btn" aria-expanded="true" aria-controls="hud-panel" type="button" title="Collapse">▾</button>
           </div>
-        </details>
-        <details open>
-          <summary>Players</summary>
-          <div class="group" id="players-group">
-            <label><span class="lbl">count</span><select id="playerCount">
-              <option value="1">1</option>
-              <option value="2" selected>2</option>
-              <option value="3">3</option>
-              <option value="4">4</option>
-            </select></label>
-            <div id="player-slots"></div>
-            <label><span class="lbl">viewer</span><select id="viewerSelect"></select></label>
-            <button id="players-apply" type="button">Apply / Regen</button>
-          </div>
-        </details>
-        <details>
-          <summary>Map</summary>
-          <div class="group">
-            <label><span class="lbl">seed</span><input id="seed" type="number" value="1337" /><button id="regen" type="button" title="randomize seed" aria-label="randomize seed">🎲</button></label>
-            <label><span class="lbl">style</span><select id="mapStyle">
-              <option value="standard">standard</option>
-              <option value="continent">continent</option>
-              <option value="continent-lakes">continent-lakes</option>
-            </select></label>
-            <label><span class="lbl">radius</span><input id="radius" type="number" min="1" max="6" value="2" placeholder="auto" /></label>
-          </div>
-        </details>
+        </div>
+        <div id="panel-body">
+          <details open>
+            <summary>Game Rules</summary>
+            <div class="group">
+              <label><span class="lbl">mixed bank pile</span><input id="ruleMixedTrade" type="checkbox" /></label>
+              <label><span class="lbl">all visible</span><input id="ruleAllVisible" type="checkbox" /></label>
+              <label><span class="lbl">fog of war</span><input id="ruleFogOfWar" type="checkbox" /></label>
+              <label><span class="lbl">guaranteed 6/8</span><input id="ruleGuaranteed68" type="checkbox" /></label>
+            <label><span class="lbl">linked opening</span><input id="ruleLinkedOpening" type="checkbox" /></label>
+            <label><span class="lbl">thief spares roller</span><input id="ruleThiefSparesCaster" type="checkbox" /></label>
+            </div>
+          </details>
+          <details open>
+            <summary>Players</summary>
+            <div class="group" id="players-group">
+              <label><span class="lbl">count</span><select id="playerCount">
+                <option value="1">1</option>
+                <option value="2" selected>2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+              </select></label>
+              <div id="player-slots"></div>
+              <button id="players-apply" type="button">Apply / Regen</button>
+            </div>
+          </details>
+          <details>
+            <summary>Map</summary>
+            <div class="group">
+              <label><span class="lbl">seed</span><input id="seed" type="number" value="1337" /><button id="regen" type="button" title="randomize seed" aria-label="randomize seed">🎲</button></label>
+              <label><span class="lbl">style</span><select id="mapStyle">
+                <option value="standard">standard</option>
+                <option value="continent">continent</option>
+                <option value="continent-lakes">continent-lakes</option>
+              </select></label>
+              <label><span class="lbl">radius</span><input id="radius" type="number" min="1" max="6" value="2" placeholder="auto" /></label>
+            </div>
+          </details>
+        </div>
       </div>
     </div>
+
 
     <!-- ===== GAMEPLAY: passives panel (above bottom bar) ===== -->
     <div id="passives-panel" class="hidden" aria-label="trade passives"></div>
 
-    <!-- ===== GAMEPLAY: bottom bar — resource HUD + trade ===== -->
+    <!-- ===== GAMEPLAY: bottom bar — resource HUD + contextual actions =====
+         The action buttons all share Trade's pill shape and live to the right
+         of the resource HUD. Visibility is contextual: roll replaces trade
+         during the roll phase, end-turn rides alongside trade in main, and
+         start-match takes the slot in pre-match. Only one role-action shows
+         at a time. -->
     <div id="bottom-bar">
+      <div class="actions-left">
+        <button id="trade-toggle" class="action-btn" type="button" aria-label="bank trade">Trade</button>
+      </div>
       <div id="resource-hud" aria-label="resources"></div>
-      <button id="trade-toggle" type="button" aria-label="bank trade">Trade</button>
+      <div class="actions-right">
+        <button id="start-match-btn" class="action-btn" type="button">Start Match</button>
+        <button id="roll-toggle" class="action-btn" type="button">Roll Dice</button>
+        <button id="end-turn-btn" class="action-btn confirm" type="button">End Turn</button>
+      </div>
     </div>
 
     <div id="resource-fx" aria-hidden="true"></div>
@@ -965,7 +1163,7 @@
     <div id="prematch-backdrop" class="modal-backdrop hidden" role="dialog" aria-modal="true">
       <div id="prematch-panel">
         <h3>Roll for first turn</h3>
-        <div class="sub" style="color: var(--surface-ink-soft); font-size: 13px; margin-bottom: 4px;">Best of three — highest sum starts.</div>
+        <div class="sub" style="color: var(--surface-ink-soft); font-size: 13px; margin-bottom: 4px;">Best of 3 rounds — most round wins starts. Ties play on.</div>
         <div id="prematch-rows"></div>
         <div class="actions">
           <button id="prematch-roll" class="primary" type="button">Roll</button>
@@ -993,6 +1191,25 @@
           <button id="trade-cancel" type="button">Cancel</button>
           <button id="trade-confirm" type="button" disabled>Trade</button>
         </div>
+      </div>
+    </div>
+
+    <!-- ===== GAMEPLAY: discard modal (robber 7) ===== -->
+    <div id="discard-backdrop" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-label="discard cards">
+      <div id="discard-panel">
+        <h3 id="discard-header">Discard cards</h3>
+        <div class="sub" id="discard-sub">Pick the cards to lose.</div>
+        <div class="trade-row" id="discard-row"></div>
+        <div class="discard-counter" id="discard-counter">Left: 0</div>
+      </div>
+    </div>
+
+    <!-- ===== GAMEPLAY: steal modal (robber pick victim) ===== -->
+    <div id="steal-backdrop" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-label="steal a card">
+      <div id="steal-panel">
+        <h3>Steal a card</h3>
+        <div class="sub">Pick a victim.</div>
+        <div id="steal-options"></div>
       </div>
     </div>
 
@@ -1127,7 +1344,7 @@
             <details>
               <summary>City</summary>
               <div class="group">
-                <label><span class="lbl">scale</span><input id="cityScale" type="number" step="0.05" min="0.1" value="0.85" /></label>
+                <label><span class="lbl">scale</span><input id="cityScale" type="number" step="0.05" min="0.1" value="0.65" /></label>
                 <label><span class="lbl">offset y</span><input id="cityOffY" type="number" step="0.01" value="-0.15" /></label>
               </div>
             </details>
@@ -1212,13 +1429,14 @@
 
     <script>
       (() => {
-        // Gameplay HUD show/hide
+        // Match panel collapse/expand — collapses just the body so the panel
+        // header (and the collapse button itself) stays visible to expand back.
         const t = document.getElementById("hud-toggle");
         const p = document.getElementById("hud-panel");
         t.addEventListener("click", () => {
-          const hidden = p.classList.toggle("hidden");
-          t.setAttribute("aria-expanded", String(!hidden));
-          t.textContent = hidden ? "controls ▸" : "controls ▾";
+          const collapsed = p.classList.toggle("collapsed");
+          t.setAttribute("aria-expanded", String(!collapsed));
+          t.textContent = collapsed ? "▸" : "▾";
         });
         // Dev drawer toggle
         const devBtn = document.getElementById("dev-toggle");

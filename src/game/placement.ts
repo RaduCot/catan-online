@@ -11,6 +11,7 @@ import {
 } from "./buildings";
 import { canAfford } from "./resources";
 import { currentBuilderId } from "./turn";
+import { getRuleLinkedOpening } from "./trade-rules";
 
 // --- Placement rules. Catan: settlements/cities at vertices (distance-2
 // apart), bridges (roads) at edges, must be connected to a friendly building
@@ -115,11 +116,41 @@ export function vertexConnectedByBridge(vk: string, graph: PlacementGraph): bool
   return false;
 }
 
+// "Linked opening" rule helper: returns true if vk has an edge to a vertex
+// that is itself touched by a friendly bridge endpoint or friendly building
+// — meaning a B2 between vk and that neighbour would join the existing
+// network.
+function vertexAdjacentToOwnNetwork(vk: string, graph: PlacementGraph): boolean {
+  const me = currentBuilderId();
+  for (const ek of graph.vertexEdges.get(vk) ?? []) {
+    const e = graph.edges.get(ek);
+    if (!e) continue;
+    const otherVk = e.ak === vk ? e.bk : e.ak;
+    const b = buildings.get(otherVk);
+    if (b && b.ownerId === me) return true;
+    for (const otherEk of graph.vertexEdges.get(otherVk) ?? []) {
+      const br = bridges.get(otherEk);
+      if (br && br.ownerId === me) return true;
+    }
+  }
+  return false;
+}
+
 export function validSettlementVertices(graph: PlacementGraph): Set<string> {
   const out = new Set<string>();
-  if (placementStep === "initial-s1" || placementStep === "initial-s2") {
+  if (placementStep === "initial-s1") {
     for (const vk of graph.vertices.keys()) {
       if (settlementDistanceOk(vk, graph)) out.add(vk);
+    }
+  } else if (placementStep === "initial-s2") {
+    const linked = getRuleLinkedOpening();
+    for (const vk of graph.vertices.keys()) {
+      if (!settlementDistanceOk(vk, graph)) continue;
+      // Linked-opening rule: S2 must sit one edge away from the player's
+      // existing network so the future B2 (between S2 and that neighbour)
+      // joins it to B1.
+      if (linked && !vertexAdjacentToOwnNetwork(vk, graph)) continue;
+      out.add(vk);
     }
   } else if (placementStep === "free") {
     if (!canAfford("settlement")) return out;
@@ -137,8 +168,26 @@ export function validBridgeEdges(graph: PlacementGraph): Set<string> {
   const me = currentBuilderId();
   if (placementStep === "initial-b1" || placementStep === "initial-b2") {
     if (!lastInitialSettlementKey) return out;
-    for (const e of graph.vertexEdges.get(lastInitialSettlementKey) ?? []) {
-      if (!bridges.has(e)) out.add(e);
+    const linked = getRuleLinkedOpening() && placementStep === "initial-b2";
+    for (const ek of graph.vertexEdges.get(lastInitialSettlementKey) ?? []) {
+      if (bridges.has(ek)) continue;
+      if (linked) {
+        // Linked-opening: B2's far endpoint must already be on the player's
+        // network (S1 or B1's free end) so the two roads share a vertex.
+        const e = graph.edges.get(ek);
+        if (!e) continue;
+        const otherVk = e.ak === lastInitialSettlementKey ? e.bk : e.ak;
+        const otherB = buildings.get(otherVk);
+        let onNetwork = !!(otherB && otherB.ownerId === me);
+        if (!onNetwork) {
+          for (const otherEk of graph.vertexEdges.get(otherVk) ?? []) {
+            const br = bridges.get(otherEk);
+            if (br && br.ownerId === me) { onNetwork = true; break; }
+          }
+        }
+        if (!onNetwork) continue;
+      }
+      out.add(ek);
     }
   } else if (placementStep === "free") {
     if (!canAfford("bridge")) return out;

@@ -62,6 +62,9 @@ export function draw(
     thievesPos: { x: number; y: number } | null;
     visibleBuildingKeys?: Set<string>;
     visibleBridgeKeys?: Set<string>;
+    thievesTileIdx: number;
+    robberMoveActive: boolean;
+    robberMoveValidTiles?: Set<number>;
   },
   hoverOpts: HoverOpts,
   vignetteOpts: VignetteOpts,
@@ -161,6 +164,28 @@ export function draw(
   // Ports (piers + marker) — drawn after land so piers visually anchor to the land edge.
   drawPorts(ctx, board, layout, portIcons, portOpts);
 
+  // Robber "locked tile" grayscale — desaturate the tile BEFORE numbers so
+  // the chance number on top stays in colour. Desert is excluded (it never
+  // produces anyway, so locking it visually would be noise). Suppressed
+  // mid-flip and during robber-move (the piece is about to relocate).
+  const robberIdx = buildingOpts.thievesTileIdx;
+  const showRobberLock = robberIdx >= 0
+    && !buildingOpts.robberMoveActive
+    && !!board.tiles[robberIdx]
+    && board.tiles[robberIdx].type !== "desert"
+    && tileRevealProgress(robberIdx, now, board.tiles.length) >= 1;
+  if (showRobberLock) {
+    const tile = board.tiles[robberIdx];
+    const { x, y } = axialToPixel(tile, layout);
+    ctx.save();
+    hexPath(ctx, x, y, layout.size);
+    ctx.clip();
+    ctx.globalCompositeOperation = "saturation";
+    ctx.fillStyle = "hsl(0, 0%, 50%)";
+    ctx.fillRect(x - layout.size, y - layout.size, layout.size * 2, layout.size * 2);
+    ctx.restore();
+  }
+
   // number tokens
   const r = layout.size * numOpts.scale;
   const offX = layout.size * numOpts.offX;
@@ -208,6 +233,34 @@ export function draw(
     ctx.restore();
   }
 
+  // Lock icon on the robber's number token — drawn over the (still-colored)
+  // number so the "this tile is out of action" cue is unambiguous. The
+  // grayscale tint already went down before the number pass.
+  if (showRobberLock) {
+    const tile = board.tiles[robberIdx];
+    if (tile.number != null) {
+      const { x, y } = axialToPixel(tile, layout);
+      const r = layout.size * numOpts.scale;
+      const offX = layout.size * numOpts.offX;
+      const offY = layout.size * numOpts.offY;
+      const cx = x + offX + r * 0.85;
+      const cy = y + offY - r * 0.85;
+      const sz = r * 1.05;
+      ctx.save();
+      // Soft halo so the icon reads on both light and dark tiles.
+      ctx.shadowColor = "rgba(0,0,0,0.85)";
+      ctx.shadowBlur = sz * 0.4;
+      ctx.shadowOffsetY = sz * 0.05;
+      ctx.drawImage(buildingImgs.lock, cx - sz / 2, cy - sz / 2, sz, sz);
+      // Second pass: warm gold glow on top of the dark halo.
+      ctx.shadowColor = "rgba(244,199,87,0.7)";
+      ctx.shadowBlur = sz * 0.55;
+      ctx.shadowOffsetY = 0;
+      ctx.drawImage(buildingImgs.lock, cx - sz / 2, cy - sz / 2, sz, sz);
+      ctx.restore();
+    }
+  }
+
   // Fog over tiles + numbers, but under buildings so placements stay vibrant.
   drawResourceFog(ctx, board, layout, fogOpts, now);
 
@@ -227,6 +280,37 @@ export function draw(
     );
   }
   drawPlacements(ctx, buildingImgs, layout, { ...buildingOpts, now });
+  // Robber-move hints: gold ring on every valid target, red ring on current
+  // robber tile so the player sees both "where it is now" and "where it can go".
+  if (buildingOpts.robberMoveActive) {
+    const pulse = 0.5 + 0.5 * Math.sin((now / 1000) * (Math.PI * 2 / 1.6));
+    const valid = buildingOpts.robberMoveValidTiles;
+    if (valid && valid.size) {
+      ctx.save();
+      ctx.lineWidth = layout.size * 0.06;
+      ctx.strokeStyle = `rgba(255, 220, 120, ${0.55 + 0.35 * pulse})`;
+      for (const idx of valid) {
+        const tile = board.tiles[idx];
+        if (!tile) continue;
+        const { x, y } = axialToPixel(tile, layout);
+        ctx.beginPath();
+        ctx.arc(x, y, layout.size * 0.62, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+    if (buildingOpts.thievesTileIdx >= 0 && board.tiles[buildingOpts.thievesTileIdx]) {
+      const tile = board.tiles[buildingOpts.thievesTileIdx];
+      const { x, y } = axialToPixel(tile, layout);
+      ctx.save();
+      ctx.lineWidth = layout.size * 0.08;
+      ctx.strokeStyle = `rgba(217, 106, 74, ${0.7 + 0.25 * pulse})`;
+      ctx.beginPath();
+      ctx.arc(x, y, layout.size * 0.62, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
   drawTileSheen(ctx, board, layout, now);
   if (placementOpts) {
     drawPlacementHints(

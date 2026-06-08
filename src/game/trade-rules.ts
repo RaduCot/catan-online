@@ -34,6 +34,33 @@ export function setRuleGuaranteed68(v: boolean) {
   ruleGuaranteed68 = v;
 }
 
+// Custom rule: the two opening road segments (B1 and B2) must share an
+// endpoint, so the player's first network is a single connected chain
+// rather than two disjoint pairs. Enforced as a placement filter on S2
+// and B2 — see validSettlementVertices / validBridgeEdges.
+let ruleLinkedOpening: boolean = false;
+
+export function getRuleLinkedOpening(): boolean {
+  return ruleLinkedOpening;
+}
+
+export function setRuleLinkedOpening(v: boolean) {
+  ruleLinkedOpening = v;
+}
+
+// Custom rule: when a 7 is rolled the robber penalty (discard half on > 7
+// cards) hits every player EXCEPT the roller. The roller still moves the
+// robber and steals as normal. Checked by triggerSevenSequence in main.ts.
+let ruleThiefSparesCaster: boolean = false;
+
+export function getRuleThiefSparesCaster(): boolean {
+  return ruleThiefSparesCaster;
+}
+
+export function setRuleThiefSparesCaster(v: boolean) {
+  ruleThiefSparesCaster = v;
+}
+
 // Tile indices that share the given vertex as a corner.
 function tilesAroundVertex(vk: string, board: Board, layout: HexLayout): Set<number> {
   const s = layout.size;

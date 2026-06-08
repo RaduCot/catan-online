@@ -9,9 +9,10 @@ import {
   iconWheatUrl,
 } from "../assets/loaders";
 import { buildings, vertexKey } from "./buildings";
-import { dice, DICE_ROLL_DURATION, DICE_SETTLE_DURATION } from "../animation/dice";
+import { dice, POST_DICE_START } from "../animation/dice";
 import { tileSheen } from "../animation/tile-sheen";
 import { getViewerPlayerId, getActivePlayerId, getPlayers, MAX_PLAYERS } from "./players";
+import { getThievesTileIdx } from "./thieves";
 
 // Resources kept as a flat record keyed by canonical resource name. The
 // multiplayer layer should call setResources(...) with authoritative counts
@@ -270,14 +271,20 @@ export function resourceCellCenter(resource: ResourceKind) {
 }
 
 export const YIELD_STAGGER_MS = 100;
-export const YIELD_BASE_DELAY_MS = (DICE_ROLL_DURATION + DICE_SETTLE_DURATION) * 1000 + 200;
+// Yields kick off only after the dice have fully faded — POST_DICE_START is
+// the dice's full lifecycle + a small buffer, expressed in seconds.
+export const YIELD_BASE_DELAY_MS = POST_DICE_START * 1000;
 
 export function scheduleRollYields(board: Board, layout: HexLayout, view: { tx: number; ty: number; zoom: number }, canvas: HTMLCanvasElement) {
   if (!dice.matchOrder.length || !buildings.size) return;
   const elapsed = performance.now() - dice.startT;
   const baseDelay = Math.max(0, YIELD_BASE_DELAY_MS - elapsed);
   let staggerIdx = 0;
+  const robberIdx = getThievesTileIdx();
   for (const tileIdx of dice.matchOrder) {
+    // The robber locks its tile — no resources are produced this roll for any
+    // building on it, regardless of ownership or kind.
+    if (tileIdx === robberIdx) continue;
     const tile = board.tiles[tileIdx];
     const resource = TILE_TO_RESOURCE[tile.type];
     if (!resource) continue;

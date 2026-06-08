@@ -23,6 +23,7 @@ import bridge30downCmaskUrl from "../../assets/buildings/bridge30down_cmask.png"
 import bridgeVerticalUrl from "../../assets/buildings/bridgevertical.png";
 import bridgeVerticalCmaskUrl from "../../assets/buildings/bridgevertical_cmask.png";
 import thievesUrl from "../../assets/thieves.png";
+import lockUrl from "../../assets/lock.png";
 
 export { iconBrickUrl, iconWoodUrl, iconStoneUrl, iconSheepUrl, iconWheatUrl };
 
@@ -98,6 +99,9 @@ export type BuildingImgs = {
   // Thieves / robber — neutral piece (no per-player tint). Sits on the
   // desert by default and is moved when a 7 is rolled.
   thieves: HTMLImageElement;
+  // Lock icon stamped on the number token of the robbed tile. Source is
+  // 512×512; rendered at small size at draw time.
+  lock: HTMLImageElement;
 };
 
 export async function loadBuildingImgs(): Promise<BuildingImgs> {
@@ -113,5 +117,6 @@ export async function loadBuildingImgs(): Promise<BuildingImgs> {
     bridgeStraight: await loadImage(bridgeVerticalUrl),
     bridgeStraightMask: await loadImage(bridgeVerticalCmaskUrl),
     thieves: await loadImage(thievesUrl),
+    lock: await loadImage(lockUrl),
   };
 }
