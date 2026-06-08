@@ -65,6 +65,8 @@ export function draw(
     thievesTileIdx: number;
     robberMoveActive: boolean;
     robberMoveValidTiles?: Set<number>;
+    robberMoveHoverPos?: { x: number; y: number } | null;
+    robberMoveHoverIdx?: number;
   },
   hoverOpts: HoverOpts,
   vignetteOpts: VignetteOpts,
@@ -287,12 +289,18 @@ export function draw(
     const valid = buildingOpts.robberMoveValidTiles;
     if (valid && valid.size) {
       ctx.save();
-      ctx.lineWidth = layout.size * 0.06;
-      ctx.strokeStyle = `rgba(255, 220, 120, ${0.55 + 0.35 * pulse})`;
+      const hoverIdx = buildingOpts.robberMoveHoverIdx ?? -1;
       for (const idx of valid) {
         const tile = board.tiles[idx];
         if (!tile) continue;
         const { x, y } = axialToPixel(tile, layout);
+        // Hovered target lightens + thickens like the bridge placement hint;
+        // the rest pulse gold.
+        const hovered = idx === hoverIdx;
+        ctx.lineWidth = layout.size * (hovered ? 0.09 : 0.06);
+        ctx.strokeStyle = hovered
+          ? "rgba(255, 240, 200, 0.95)"
+          : `rgba(255, 220, 120, ${0.55 + 0.35 * pulse})`;
         ctx.beginPath();
         ctx.arc(x, y, layout.size * 0.62, 0, Math.PI * 2);
         ctx.stroke();
@@ -309,6 +317,19 @@ export function draw(
       ctx.arc(x, y, layout.size * 0.62, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
+    }
+    // Ghost thief under the cursor — same artwork/size/offset as the placed
+    // piece but at 0.55 alpha, matching the settlement/bridge placement ghost.
+    if (buildingOpts.robberMoveHoverPos && buildingOpts.thievesScale > 0 && buildingImgs.thieves) {
+      const size = layout.size * buildingOpts.thievesScale * buildingOpts.buildingScale;
+      if (size > 0) {
+        const cx = buildingOpts.robberMoveHoverPos.x;
+        const cy = buildingOpts.robberMoveHoverPos.y + buildingOpts.thievesOffY * layout.size;
+        ctx.save();
+        ctx.globalAlpha = 0.55;
+        ctx.drawImage(buildingImgs.thieves, cx - size / 2, cy - size / 2, size, size);
+        ctx.restore();
+      }
     }
   }
   drawTileSheen(ctx, board, layout, now);

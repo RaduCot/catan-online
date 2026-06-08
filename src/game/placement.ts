@@ -17,7 +17,9 @@ import { getRuleLinkedOpening } from "./trade-rules";
 // apart), bridges (roads) at edges, must be connected to a friendly building
 // or bridge. Opening phase is a forced sequence: S1, B1 touching S1, S2
 // anywhere valid, B2 touching S2. After that → free mode.
-export type PlacementStep = "initial-s1" | "initial-b1" | "initial-s2" | "initial-b2" | "free";
+// "dev-road" is the Road Building dev-card state: place roads with the same
+// connectivity rule as free mode, but for free (no resource cost).
+export type PlacementStep = "initial-s1" | "initial-b1" | "initial-s2" | "initial-b2" | "free" | "dev-road";
 let placementStep: PlacementStep = "initial-s1";
 // Vertex key of the most recently placed initial settlement — the next bridge
 // must touch it.
@@ -189,8 +191,9 @@ export function validBridgeEdges(graph: PlacementGraph): Set<string> {
       }
       out.add(ek);
     }
-  } else if (placementStep === "free") {
-    if (!canAfford("bridge")) return out;
+  } else if (placementStep === "free" || placementStep === "dev-road") {
+    // dev-road (Road Building card) places for free — skip the afford check.
+    if (placementStep === "free" && !canAfford("bridge")) return out;
     for (const [ek, eData] of graph.edges) {
       if (bridges.has(ek)) continue;
       let connected = false;

@@ -12,6 +12,7 @@ import iconWoodUrl from "../../assets/resources/wood.png";
 import iconStoneUrl from "../../assets/resources/stone.png";
 import iconSheepUrl from "../../assets/resources/sheep.png";
 import iconWheatUrl from "../../assets/resources/wheat.png";
+import iconVictoryPointUrl from "../../assets/resources/victory_point.png";
 import settlementUrl from "../../assets/buildings/settlement.png";
 import settlementCmaskUrl from "../../assets/buildings/settlement_cmask.png";
 import cityUrl from "../../assets/buildings/city.png";
@@ -25,7 +26,37 @@ import bridgeVerticalCmaskUrl from "../../assets/buildings/bridgevertical_cmask.
 import thievesUrl from "../../assets/thieves.png";
 import lockUrl from "../../assets/lock.png";
 
-export { iconBrickUrl, iconWoodUrl, iconStoneUrl, iconSheepUrl, iconWheatUrl };
+import cardKnight1Url from "../../assets/cards/dev_knight1.png";
+import cardKnight2Url from "../../assets/cards/dev_knight2.png";
+import cardKnight3Url from "../../assets/cards/dev_knight3.png";
+import cardKnight4Url from "../../assets/cards/dev_knight4.png";
+import cardKnight5Url from "../../assets/cards/dev_knight5.png";
+import cardVictoryPointUrl from "../../assets/cards/dev_victory_point.png";
+import cardRoadUrl from "../../assets/cards/dev_road.png";
+import cardResourcesUrl from "../../assets/cards/dev_resources.png";
+import cardMonopolyUrl from "../../assets/cards/dev_monopoly.png";
+import cardAchievementArmyUrl from "../../assets/cards/achievement_army.png";
+import cardAchievementRoadUrl from "../../assets/cards/achievement_road.png";
+
+export { iconBrickUrl, iconWoodUrl, iconStoneUrl, iconSheepUrl, iconWheatUrl, iconVictoryPointUrl };
+
+// Development-card art. Knight has 5 variants (picked at draw for variety);
+// the others have one each. URL strings used directly as <img src> in the
+// HTML card-hand UI — no canvas preload needed.
+export const KNIGHT_CARD_ART: string[] = [
+  cardKnight1Url, cardKnight2Url, cardKnight3Url, cardKnight4Url, cardKnight5Url,
+];
+export const DEV_CARD_ART = {
+  knight: KNIGHT_CARD_ART,
+  victoryPoint: cardVictoryPointUrl,
+  roadBuilding: cardRoadUrl,
+  yearOfPlenty: cardResourcesUrl,
+  monopoly: cardMonopolyUrl,
+} as const;
+export const ACHIEVEMENT_ART = {
+  army: cardAchievementArmyUrl,
+  road: cardAchievementRoadUrl,
+} as const;
 
 export const TILE_URLS: Record<TileType, string> = {
   bricks: clayUrl,

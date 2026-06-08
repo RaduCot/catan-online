@@ -15,6 +15,10 @@ export type Phase =
 
 let phase: Phase = "pre-match";
 let turnOrder: number[] = [];
+// Monotonic turn counter. Bumped each time the active player hands off (and
+// once when the opening completes). The dev-card "ready" rule compares a card's
+// boughtTurn against this so a card can only be played on a strictly later turn.
+let turnNumber: number = 0;
 // Sequential opening: each player places their full S1+B1+S2+B2 before the
 // next player starts. Slot indexes turnOrder; advances once per player.
 let openingSlot: number = 0;
@@ -28,6 +32,8 @@ let discardQueue: DiscardEntry[] = [];
 
 export function getPhase(): Phase { return phase; }
 export function setPhase(p: Phase) { phase = p; }
+export function getTurnNumber(): number { return turnNumber; }
+export function incrementTurn() { turnNumber++; }
 export function getTurnOrder(): number[] { return turnOrder; }
 export function setTurnOrder(order: number[]) { turnOrder = order.slice(); }
 export function getOpeningSlot(): number { return openingSlot; }
@@ -44,6 +50,9 @@ export function openingAdvance() {
   if (openingSlot >= turnOrder.length) {
     phase = "roll";
     setActivePlayerId(turnOrder[0]);
+    // First real turn begins — start the turn counter at 1 so any card the
+    // opener somehow holds (none yet) would already be on an earlier turn.
+    turnNumber = 1;
   }
 }
 
@@ -58,6 +67,7 @@ export function endTurn() {
   const next = order[(idx + 1) % order.length];
   setActivePlayerId(next);
   phase = "roll";
+  turnNumber++;
 }
 
 export function markDiceRolled() {
@@ -71,6 +81,7 @@ export function resetTurnState() {
   turnOrder = [];
   openingSlot = 0;
   discardQueue = [];
+  turnNumber = 0;
 }
 
 // Whoever is the current "builder" for placement purposes — opening's snake

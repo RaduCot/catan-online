@@ -61,6 +61,33 @@ export function setRuleThiefSparesCaster(v: boolean) {
   ruleThiefSparesCaster = v;
 }
 
+// Custom rule: the robber may be left on the tile it already occupies (vanilla
+// Catan forces it to a different tile). When on, the "must move" guard and the
+// stale-tile exclusion from the valid-target set are lifted. Read by the
+// robber-move click handler and the valid-tile/ring rendering in main.ts.
+let ruleThiefStayAllowed: boolean = false;
+
+export function getRuleThiefStayAllowed(): boolean {
+  return ruleThiefStayAllowed;
+}
+
+export function setRuleThiefStayAllowed(v: boolean) {
+  ruleThiefStayAllowed = v;
+}
+
+// Custom rule: skip the "steal a card from a victim" step entirely — moving the
+// robber ends the robber sequence with no theft (and no victim modal). Checked
+// by resolveSteal in main.ts.
+let ruleThiefSkipSteal: boolean = false;
+
+export function getRuleThiefSkipSteal(): boolean {
+  return ruleThiefSkipSteal;
+}
+
+export function setRuleThiefSkipSteal(v: boolean) {
+  ruleThiefSkipSteal = v;
+}
+
 // Tile indices that share the given vertex as a corner.
 function tilesAroundVertex(vk: string, board: Board, layout: HexLayout): Set<number> {
   const s = layout.size;

@@ -1,6 +1,6 @@
 import { generateBoard, MapStyle, PortType } from "./board";
 
-import { loadImages, loadPortIcons, loadBuildingImgs, BuildingImgs } from "./assets/loaders";
+import { loadImages, loadPortIcons, loadBuildingImgs, BuildingImgs, DEV_CARD_ART, ACHIEVEMENT_ART, iconVictoryPointUrl } from "./assets/loaders";
 
 import { fitLayout, computeMinZoom, clampView, View } from "./camera/layout";
 import { draw } from "./render/scene";
@@ -56,11 +56,33 @@ import {
   resetAllResources,
   mountResourceHud,
   renderResourceHud,
+  renderVictoryHud,
   spendForBuild,
   bumpResourceCell,
+  bumpResourceCellLoss,
+  spawnResourceSteal,
   scheduleRollYields,
   setOnResourcesChanged,
+  DEV_CARD_COST,
+  canAffordCost,
+  spendCost,
 } from "./game/resources";
+import {
+  DevCardType,
+  DevCardInstance,
+  DEV_CARD_INFO,
+  resetDevCards,
+  drawDevCard,
+  grantDevCard,
+  deckRemaining,
+  getPlayerCards,
+  playedKnights,
+  canPlayDevCard,
+  isReady,
+  markPlayed,
+  resetDevCardTurnFlag,
+} from "./game/dev-cards";
+import { recomputeLargestArmy, recomputeLongestRoad } from "./game/achievements";
 import {
   getBankTradeRule,
   setBankTradeRule,
@@ -68,6 +90,10 @@ import {
   setRuleLinkedOpening,
   getRuleThiefSparesCaster,
   setRuleThiefSparesCaster,
+  getRuleThiefStayAllowed,
+  setRuleThiefStayAllowed,
+  getRuleThiefSkipSteal,
+  setRuleThiefSkipSteal,
   reshuffleFor68Rule,
   tradeRateFor,
   ownedPortTypes,
@@ -100,6 +126,7 @@ import {
   startRobberMovePhase,
   startRobberStealPhase,
   finishRobber,
+  getTurnNumber,
 } from "./game/turn";
 import { POST_DICE_START } from "./animation/dice";
 import {
@@ -127,6 +154,8 @@ async function main() {
   const ruleGuaranteed68Input = document.getElementById("ruleGuaranteed68") as HTMLInputElement;
   const ruleLinkedOpeningInput = document.getElementById("ruleLinkedOpening") as HTMLInputElement;
   const ruleThiefSparesCasterInput = document.getElementById("ruleThiefSparesCaster") as HTMLInputElement;
+  const ruleThiefStayAllowedInput = document.getElementById("ruleThiefStayAllowed") as HTMLInputElement;
+  const ruleThiefSkipStealInput = document.getElementById("ruleThiefSkipSteal") as HTMLInputElement;
   const rollBtn = document.getElementById("roll-toggle") as HTMLButtonElement;
   const endTurnBtn = document.getElementById("end-turn-btn") as HTMLButtonElement;
   const startMatchBtn = document.getElementById("start-match-btn") as HTMLButtonElement;
@@ -216,6 +245,28 @@ async function main() {
   const discardCounter = document.getElementById("discard-counter") as HTMLDivElement | null;
   const stealBackdrop = document.getElementById("steal-backdrop") as HTMLDivElement | null;
   const stealOptions = document.getElementById("steal-options") as HTMLDivElement | null;
+  // Development / achievement card UI.
+  const cardHand = document.getElementById("card-hand") as HTMLDivElement | null;
+  const buyDevCardBtn = null as HTMLButtonElement | null; // created inside renderCardHand
+  const cardDetailBackdrop = document.getElementById("card-detail-backdrop") as HTMLDivElement | null;
+  const cardDetailArt = document.getElementById("card-detail-art") as HTMLImageElement | null;
+  const cardDetailTitle = document.getElementById("card-detail-title") as HTMLHeadingElement | null;
+  const cardDetailKind = document.getElementById("card-detail-kind") as HTMLSpanElement | null;
+  const cardDetailVp = document.getElementById("card-detail-vp") as HTMLDivElement | null;
+  const cardDetailRule = document.getElementById("card-detail-rule") as HTMLDivElement | null;
+  const cardDetailClose = document.getElementById("card-detail-close") as HTMLButtonElement | null;
+  const cardDetailPlay = document.getElementById("card-detail-play") as HTMLButtonElement | null;
+  const yopBackdrop = document.getElementById("yop-backdrop") as HTMLDivElement | null;
+  const yopRow = document.getElementById("yop-row") as HTMLDivElement | null;
+  const yopCounter = document.getElementById("yop-counter") as HTMLDivElement | null;
+  const yopCancel = document.getElementById("yop-cancel") as HTMLButtonElement | null;
+  const yopConfirm = document.getElementById("yop-confirm") as HTMLButtonElement | null;
+  const monopolyBackdrop = document.getElementById("monopoly-backdrop") as HTMLDivElement | null;
+  const monopolyRow = document.getElementById("monopoly-row") as HTMLDivElement | null;
+  const monopolyCounter = document.getElementById("monopoly-counter") as HTMLDivElement | null;
+  const monopolyCancel = document.getElementById("monopoly-cancel") as HTMLButtonElement | null;
+  const monopolyConfirm = document.getElementById("monopoly-confirm") as HTMLButtonElement | null;
+  void buyDevCardBtn;
 
   const images = await loadImages();
   const portIcons = await loadPortIcons();
@@ -267,6 +318,16 @@ async function main() {
   const view: View = { tx: 0, ty: 0, zoom: 1 };
   let dpr = window.devicePixelRatio || 1;
 
+  // Smooth wheel/pinch zoom: the wheel handler nudges `zoomTarget`, and the
+  // tick loop eases `view.zoom` toward it, anchoring on the screen point the
+  // cursor was over when the last wheel event arrived.
+  const zoomEase = {
+    target: 1,
+    anchorX: 0,
+    anchorY: 0,
+    active: false,
+  };
+
   // refreshPassivesAndTrade is local — assigned later from the trade UI block.
   let refreshPassivesAndTrade: () => void = () => {};
   let refreshPlayerStrip: () => void = () => {};
@@ -288,6 +349,23 @@ async function main() {
 
   function ownerColor(id: number): string {
     return getPlayerColor(id);
+  }
+
+  // Snap a world-space point to the nearest tile whose center it falls within
+  // (the hex inradius). Returns -1 when the point is outside every tile.
+  // Shared by the robber-move click handler and its hover ghost.
+  function tileAtPixel(wx: number, wy: number, layout: ReturnType<typeof fitLayout>): number {
+    const r2Limit = (layout.size * Math.sqrt(3) / 2) ** 2;
+    let bestIdx = -1;
+    let bestD2 = Infinity;
+    for (let i = 0; i < board.tiles.length; i++) {
+      const { x, y } = axialToPixel(board.tiles[i], layout);
+      const dx = wx - x;
+      const dy = wy - y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < bestD2) { bestD2 = d2; bestIdx = i; }
+    }
+    return bestIdx >= 0 && bestD2 <= r2Limit ? bestIdx : -1;
   }
 
   function render() {
@@ -354,6 +432,24 @@ async function main() {
       blend: (hoverBlendInput.value as GlobalCompositeOperation) || "source-over",
     };
     const thievesTileIdx = getThievesTileIdx();
+    // During robber-move, ghost the thief onto whichever tile the cursor is
+    // over (a valid, different tile) so the player previews where it'll land —
+    // mirroring the settlement/bridge placement ghost.
+    let robberMoveHoverPos: { x: number; y: number } | null = null;
+    let robberMoveHoverIdx = -1;
+    if (getPhase() === "robber-move"
+      && currentBuilderId() === getActivePlayerId()
+      && getActivePlayerId() === getViewerPlayerId()
+      && mouseX >= 0) {
+      const wx = (mouseX - view.tx) / view.zoom;
+      const wy = (mouseY - view.ty) / view.zoom;
+      const hoverIdx = tileAtPixel(wx, wy, layout);
+      // Ghost on any tile, including the current one when "thief may stay" is on.
+      if (hoverIdx >= 0 && (getRuleThiefStayAllowed() || hoverIdx !== thievesTileIdx)) {
+        robberMoveHoverPos = axialToPixel(board.tiles[hoverIdx], layout);
+        robberMoveHoverIdx = hoverIdx;
+      }
+    }
     const buildingOpts = {
       settlementScale: Math.max(0.05, Number(settlementScaleInput.value) || 0.55),
       settlementOffY: Number(settlementOffYInput.value) || 0,
@@ -395,9 +491,12 @@ async function main() {
         ? axialToPixel(board.tiles[thievesTileIdx], layout)
         : null,
       thievesTileIdx,
+      robberMoveHoverPos,
+      robberMoveHoverIdx,
       robberMoveActive: getPhase() === "robber-move",
       robberMoveValidTiles: getPhase() === "robber-move"
-        ? new Set(board.tiles.map((_, i) => i).filter((i) => i !== thievesTileIdx))
+        // With "thief may stay" on, the current tile is also a valid target.
+        ? new Set(board.tiles.map((_, i) => i).filter((i) => getRuleThiefStayAllowed() || i !== thievesTileIdx))
         : undefined,
       // Fog mode hides opponents' pieces until the viewer has explored a tile
       // they touch. Other modes render every piece.
@@ -455,6 +554,22 @@ async function main() {
     const dt = lastTickT === 0 ? 0 : Math.min(0.1, (t - lastTickT) / 1000);
     lastTickT = t;
     let needsRender = false;
+    // Ease the live zoom toward the wheel target, re-anchoring on the cursor
+    // each frame so the world point under the cursor stays put. Exponential
+    // smoothing (frame-rate independent via dt) gives a soft settle.
+    if (zoomEase.active) {
+      const smooth = 1 - Math.exp(-dt * 16);
+      const newZoom = view.zoom + (zoomEase.target - view.zoom) * smooth;
+      const k = newZoom / view.zoom;
+      view.tx = zoomEase.anchorX - k * (zoomEase.anchorX - view.tx);
+      view.ty = zoomEase.anchorY - k * (zoomEase.anchorY - view.ty);
+      view.zoom = newZoom;
+      if (Math.abs(zoomEase.target - view.zoom) < 1e-4) {
+        view.zoom = zoomEase.target;
+        zoomEase.active = false;
+      }
+      needsRender = true;
+    }
     if (revealAnimationRunning(t, board.tiles.length)) needsRender = true;
     if (diceAnimationRunning(t)) needsRender = true;
     if (matchPopAnimationRunning(t)) needsRender = true;
@@ -711,6 +826,13 @@ async function main() {
 
   // Resolve the steal after the robber moved. Called from canvas click handler.
   function resolveSteal() {
+    // "Skip steal" rule: moving the robber ends the sequence with no theft.
+    if (getRuleThiefSkipSteal()) {
+      finishRobber();
+      refreshTopButtons();
+      render();
+      return;
+    }
     const robberId = getActivePlayerId();
     const tileIdx = getThievesTileIdx();
     const layout = fitLayout(board, canvas.clientWidth, canvas.clientHeight);
@@ -720,16 +842,17 @@ async function main() {
       const vHand = resourceCounts[victimId];
       const tHand = resourceCounts[robberId];
       if (!vHand || !tHand) { finishRobber(); refreshTopButtons(); render(); return; }
+      // Weight by count: expand the victim's hand into a flat list so a card is
+      // as likely as its share of the hand, then pick one uniformly.
       const candidates: ResourceKind[] = [];
       for (const k of RESOURCE_ORDER) for (let i = 0; i < vHand[k]; i++) candidates.push(k);
       if (!candidates.length) { finishRobber(); refreshTopButtons(); render(); return; }
       const picked = candidates[Math.floor(Math.random() * candidates.length)];
-      vHand[picked] = Math.max(0, vHand[picked] - 1);
-      tHand[picked] = tHand[picked] + 1;
       const victimName = getPlayers().find((p) => p.id === victimId)?.name ?? `P${victimId + 1}`;
       showActionPrompt(`${robberName} stole a ${RESOURCE_LABELS[picked].toLowerCase()} from ${victimName}!`);
-      renderResourceHud(getViewerPlayerId());
-      refreshPlayerStrip();
+      // The fly animation owns the actual debit/credit (and the loss/gain pops)
+      // so the count changes land in step with the card's arc.
+      spawnResourceSteal(picked, victimId, robberId);
       finishRobber();
       refreshTopButtons();
       render();
@@ -772,12 +895,24 @@ async function main() {
     setThievesTileIdx(defaultThievesIdx(board));
     resetSharedReveal();
     resetTurnState();
+    resetDevCards(); // fresh shuffled deck + empty hands
+    // Clear achievement flags + knight-derived state for every player.
+    for (const p of getPlayers()) {
+      p.hasLargestArmy = false;
+      p.hasLongestRoad = false;
+      p.longestRoadLength = 0;
+    }
     sevenPending = false;
     if (discardBackdrop) discardBackdrop.classList.add("hidden");
     if (stealBackdrop) stealBackdrop.classList.add("hidden");
+    if (cardDetailBackdrop) cardDetailBackdrop.classList.add("hidden");
+    if (yopBackdrop) yopBackdrop.classList.add("hidden");
+    if (monopolyBackdrop) monopolyBackdrop.classList.add("hidden");
+    renderVictoryHud(getViewerPlayerId());
     refreshPassivesAndTrade();
     refreshPlayerStrip();
     refreshTopButtons();
+    renderCardHand();
   }
 
   function regen() {
@@ -841,12 +976,15 @@ async function main() {
       const cssH = canvas.clientHeight;
       const layout = fitLayout(board, cssW, cssH);
       const minZoom = computeMinZoom(board, layout, cssW, cssH);
-      const factor = Math.exp(-e.deltaY * 0.01);
-      const newZoom = Math.min(8, Math.max(minZoom, view.zoom * factor));
-      const k = newZoom / view.zoom;
-      view.tx = cx - k * (cx - view.tx);
-      view.ty = cy - k * (cy - view.ty);
-      view.zoom = newZoom;
+      // Smaller per-notch coefficient => finer granularity. Each wheel event
+      // nudges the eased target rather than snapping the live zoom, so rapid
+      // scrolls accumulate smoothly and the tick loop interpolates the rest.
+      const base = zoomEase.active ? zoomEase.target : view.zoom;
+      const factor = Math.exp(-e.deltaY * 0.0025);
+      zoomEase.target = Math.min(8, Math.max(minZoom, base * factor));
+      zoomEase.anchorX = cx;
+      zoomEase.anchorY = cy;
+      zoomEase.active = true;
     } else {
       view.tx -= e.deltaX;
       view.ty -= e.deltaY;
@@ -889,7 +1027,8 @@ async function main() {
   });
   endTurnBtn.addEventListener("click", () => {
     if (getPhase() !== "main") return;
-    endTurn();
+    endTurn(); // bumps the turn counter → last turn's cards become ready
+    resetDevCardTurnFlag(); // new turn: the one-dev-card-per-turn limit resets
     // Snap viewer back to active when ending a turn — debug peeks are reset
     // so the new active player sees their own hand on entry.
     setViewerPlayerId(getActivePlayerId());
@@ -897,6 +1036,7 @@ async function main() {
     refreshPassivesAndTrade();
     refreshPlayerStrip();
     refreshTopButtons();
+    renderCardHand();
     render();
   });
   canvas.addEventListener("click", (e) => {
@@ -922,20 +1062,11 @@ async function main() {
       const wx = (mx - view.tx) / view.zoom;
       const wy = (my - view.ty) / view.zoom;
       const layout = fitLayout(board, canvas.clientWidth, canvas.clientHeight);
-      // Snap to closest tile center within the inradius (the largest distance
-      // that's strictly inside the hex from its center).
-      const r2Limit = (layout.size * Math.sqrt(3) / 2) ** 2;
-      let bestIdx = -1;
-      let bestD2 = Infinity;
-      for (let i = 0; i < board.tiles.length; i++) {
-        const { x, y } = axialToPixel(board.tiles[i], layout);
-        const dx = wx - x;
-        const dy = wy - y;
-        const d2 = dx * dx + dy * dy;
-        if (d2 < bestD2) { bestD2 = d2; bestIdx = i; }
-      }
-      if (bestIdx < 0 || bestD2 > r2Limit) return;
-      if (bestIdx === getThievesTileIdx()) return; // robber must move
+      const bestIdx = tileAtPixel(wx, wy, layout);
+      if (bestIdx < 0) return;
+      // Vanilla forces a move; the "thief may stay" rule allows re-placing on
+      // the same tile.
+      if (bestIdx === getThievesTileIdx() && !getRuleThiefStayAllowed()) return;
       setThievesTileIdx(bestIdx);
       resolveSteal();
       return;
@@ -1033,11 +1164,18 @@ async function main() {
         }
       } else if (getPlacementStep() === "free") {
         spendForBuild("bridge", builderId);
+      } else if (getPlacementStep() === "dev-road") {
+        // Road Building dev card: free road, no spend. Decrement the counter
+        // and exit the state when both roads are down.
+        onDevRoadPlaced();
       }
     }
     refreshFogReveals(board, fitLayout(board, canvas.clientWidth, canvas.clientHeight));
     refreshPassivesAndTrade();
-    refreshPlayerStrip();
+    // A road or settlement just landed — recompute Longest Road for everyone
+    // (covers normal roads, not just the Road Building dev card). This also
+    // refreshes the VP badge + player strip.
+    refreshAchievements();
     refreshTopButtons();
     render();
   });
@@ -1067,6 +1205,8 @@ async function main() {
     el.addEventListener("change", render);
   }
   window.addEventListener("resize", resize);
+  // The card fan's overlap depends on the bar's (viewport-relative) width.
+  window.addEventListener("resize", updateCardFanOverlap);
 
   // --- Bank trade UI + passives badges ---
   const tradeToggleBtn = document.getElementById("trade-toggle") as HTMLButtonElement;
@@ -1372,6 +1512,15 @@ async function main() {
   ruleThiefSparesCasterInput.addEventListener("change", () => {
     setRuleThiefSparesCaster(ruleThiefSparesCasterInput.checked);
   });
+  ruleThiefStayAllowedInput.addEventListener("change", () => {
+    setRuleThiefStayAllowed(ruleThiefStayAllowedInput.checked);
+    // Re-render so the current tile's ring/ghost eligibility updates live if
+    // toggled mid robber-move.
+    render();
+  });
+  ruleThiefSkipStealInput.addEventListener("change", () => {
+    setRuleThiefSkipSteal(ruleThiefSkipStealInput.checked);
+  });
 
   function renderPassives() {
     const ports = currentPorts();
@@ -1400,7 +1549,7 @@ async function main() {
     }
     passivesPanel.classList.toggle("hidden", passivesPanel.children.length === 0);
   }
-  setOnResourcesChanged(() => { refreshTradeUI(); refreshPlayerStrip(); });
+  setOnResourcesChanged(() => { refreshTradeUI(); refreshPlayerStrip(); renderCardHand(); });
   refreshPassivesAndTrade = () => { renderPassives(); refreshTradeUI(); };
   renderPassives();
 
@@ -1413,6 +1562,7 @@ async function main() {
     for (const p of getPlayers()) {
       const chip = document.createElement("div");
       chip.className = "pchip";
+      chip.dataset.playerId = String(p.id);
       if (p.id === activeId && phase !== "pre-match") chip.classList.add("active");
       if (p.id === viewerId && p.id !== activeId) chip.classList.add("viewer");
       const stripe = document.createElement("span");
@@ -1430,9 +1580,551 @@ async function main() {
       chip.appendChild(stripe);
       chip.appendChild(name);
       chip.appendChild(cards);
+      // Public badges row: played-knight count (always shown — others know your
+      // army size), plus Largest Army / Longest Road chips when held. The total
+      // dev-card count stays private (only the resource-card count is public via
+      // .pcards), so we deliberately don't surface devCardCount here.
+      const achieves = document.createElement("div");
+      achieves.className = "pachieves";
+      const knights = document.createElement("span");
+      knights.className = "knights";
+      knights.textContent = String(playedKnights(p.id));
+      knights.title = "Knights played";
+      achieves.appendChild(knights);
+      if (p.hasLargestArmy) {
+        const a = document.createElement("span");
+        a.className = "ach army";
+        a.textContent = "Army +2";
+        a.title = "Largest Army";
+        achieves.appendChild(a);
+      }
+      if (p.hasLongestRoad) {
+        const a = document.createElement("span");
+        a.className = "ach road";
+        a.textContent = "Road +2";
+        a.title = "Longest Road";
+        achieves.appendChild(a);
+      }
+      chip.appendChild(achieves);
       playerStrip.appendChild(chip);
     }
   };
+
+  // ===================================================================
+  // Development & achievement cards
+  // ===================================================================
+
+  // Resolve a card instance's art URL (knights have 5 variants).
+  function cardArtFor(inst: DevCardInstance): string {
+    if (inst.type === "knight") return DEV_CARD_ART.knight[inst.knightArtIdx] ?? DEV_CARD_ART.knight[0];
+    return DEV_CARD_ART[inst.type] as string;
+  }
+
+  // Card rule text as DOM (the VP card embeds the victory-point icon inline).
+  function cardRuleNode(type: DevCardType): Node {
+    const span = document.createElement("span");
+    if (type === "victoryPoint") {
+      span.append("Worth 1 ");
+      const img = document.createElement("img");
+      img.src = iconVictoryPointUrl;
+      img.alt = "victory point";
+      span.appendChild(img);
+      span.append(" victory point. Counts immediately and stays hidden from opponents until you win.");
+    } else {
+      span.textContent = DEV_CARD_INFO[type].rule;
+    }
+    return span;
+  }
+
+  // Achievement rule text with the victory-point icon inline (matches the VP
+  // dev card's treatment). `which` selects army vs road wording.
+  function achievementRuleNode(which: "army" | "road"): Node {
+    const span = document.createElement("span");
+    const lead = which === "army"
+      ? "Awarded to the player with the most played knights (at least 3). Worth 2 "
+      : "Awarded to the player with the longest continuous road (at least 5 segments). Worth 2 ";
+    span.append(lead);
+    const img = document.createElement("img");
+    img.src = iconVictoryPointUrl;
+    img.alt = "victory points";
+    span.appendChild(img);
+    span.append(" until another player surpasses you.");
+    return span;
+  }
+
+  // Recompute achievements + refresh every dependent surface after a card play
+  // or road placement changes army/road standings.
+  function refreshAchievements() {
+    const layout = fitLayout(board, canvas.clientWidth, canvas.clientHeight);
+    recomputeLargestArmy(getPlayers());
+    recomputeLongestRoad(board, layout, getPlayers());
+    renderVictoryHud(getViewerPlayerId());
+    refreshPlayerStrip();
+  }
+
+  // Build one card element for a stack of `count` identical cards. `repr` is the
+  // representative instance; `onClick` opens its detail. Stacks of >1 get a ×N
+  // badge. Played cards render grayscale (handled via the .played class).
+  function buildStackCard(repr: DevCardInstance, count: number, turn: number, phase: string): HTMLElement {
+    const card = document.createElement("div");
+    card.className = "game-card";
+    const playable = !repr.played && canPlayDevCard(repr, turn, phase);
+    if (playable) card.classList.add("playable");
+    if (repr.played) card.classList.add("played-card");
+    const info = DEV_CARD_INFO[repr.type];
+
+    const art = document.createElement("img");
+    art.className = "game-card-art";
+    art.src = cardArtFor(repr);
+    art.alt = info.title;
+    art.draggable = false;
+    card.appendChild(art);
+
+    // Status indicator. Ready and played cards carry no label (the gold ring
+    // already marks playable ones, and grayscale marks played). Not-ready cards
+    // show a sand-timer only; VP cards keep their "+1 VP" passive note.
+    if (!repr.played && repr.type === "victoryPoint") {
+      const pill = document.createElement("span");
+      pill.className = "status-pill passive";
+      pill.textContent = "+1 VP";
+      card.appendChild(pill);
+    } else if (!repr.played && !isReady(repr, turn)) {
+      const pill = document.createElement("span");
+      pill.className = "status-pill not-ready";
+      // Inline SVG hourglass — renders reliably regardless of emoji font support.
+      pill.innerHTML =
+        '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" ' +
+        'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+        '<path d="M6 2h12M6 22h12M6 2v5l6 5 6-5V2M6 22v-5l6-5 6 5v5"/></svg>';
+      pill.title = "Not ready until your next turn";
+      card.appendChild(pill);
+    }
+
+    // Count badge for stacks of more than one.
+    if (count > 1) {
+      const badge = document.createElement("span");
+      badge.className = "count-badge";
+      badge.textContent = `×${count}`;
+      card.appendChild(badge);
+    }
+
+    const body = document.createElement("div");
+    body.className = "game-card-body";
+    const title = document.createElement("div");
+    title.className = "game-card-title";
+    title.textContent = info.title;
+    const rule = document.createElement("div");
+    rule.className = "game-card-rule";
+    rule.appendChild(cardRuleNode(repr.type));
+    body.appendChild(title);
+    body.appendChild(rule);
+    card.appendChild(body);
+
+    card.addEventListener("click", () => openCardDetail(repr));
+    return card;
+  }
+
+  // Build the viewer's card-hand. Two rows: played cards (grayscale) on top,
+  // active cards + achievements + buy button on the bottom. Identical cards are
+  // grouped into a single stack with a ×N badge to tame large hands.
+  function renderCardHand() {
+    if (!cardHand) return;
+    const phase = getPhase();
+    if (phase === "pre-match") { cardHand.classList.add("hidden"); return; }
+    cardHand.classList.remove("hidden");
+    cardHand.innerHTML = "";
+    const viewer = getViewerPlayerId();
+    const turn = getTurnNumber();
+
+    const playedRow = document.createElement("div");
+    playedRow.className = "card-row played-row";
+    const activeRow = document.createElement("div");
+    activeRow.className = "card-row active-row";
+
+    // Group cards by a stack key so identical ones collapse into one element.
+    // Key splits on type + played + ready so a mixed batch (e.g. some ready,
+    // one fresh) shows as distinct stacks the player can reason about.
+    type Stack = { repr: DevCardInstance; count: number; played: boolean };
+    const stacks = new Map<string, Stack>();
+    for (const inst of getPlayerCards(viewer)) {
+      const ready = inst.played ? true : isReady(inst, turn);
+      const key = `${inst.type}|${inst.played ? "p" : ready ? "r" : "n"}`;
+      const s = stacks.get(key);
+      if (s) s.count++;
+      else stacks.set(key, { repr: inst, count: 1, played: inst.played });
+    }
+    for (const { repr, count, played } of stacks.values()) {
+      const card = buildStackCard(repr, count, turn, phase);
+      (played ? playedRow : activeRow).appendChild(card);
+    }
+
+    // Achievement cards the viewer holds — read-only, clickable for detail.
+    const viewerPlayer = getPlayer(viewer);
+    const addAchievementCard = (which: "army" | "road", art: string, title: string) => {
+      const card = document.createElement("div");
+      card.className = "game-card achievement-card";
+      const img = document.createElement("img");
+      img.className = "game-card-art";
+      img.src = art; img.alt = title; img.draggable = false;
+      card.appendChild(img);
+      const pill = document.createElement("span");
+      pill.className = "status-pill passive";
+      pill.textContent = "+2 VP";
+      card.appendChild(pill);
+      const body = document.createElement("div");
+      body.className = "game-card-body";
+      const t = document.createElement("div");
+      t.className = "game-card-title"; t.textContent = title;
+      const ru = document.createElement("div");
+      ru.className = "game-card-rule"; ru.appendChild(achievementRuleNode(which));
+      body.appendChild(t); body.appendChild(ru);
+      card.appendChild(body);
+      card.addEventListener("click", () => previewCard(which === "army" ? "achievementArmy" : "achievementRoad"));
+      activeRow.appendChild(card);
+    };
+    if (viewerPlayer?.hasLargestArmy) addAchievementCard("army", ACHIEVEMENT_ART.army, "Largest Army");
+    if (viewerPlayer?.hasLongestRoad) addAchievementCard("road", ACHIEVEMENT_ART.road, "Longest Road");
+
+    // Buy button (end of the active row). Disabled off-turn / can't afford / deck empty.
+    const buy = document.createElement("button");
+    buy.id = "buy-dev-card";
+    buy.type = "button";
+    const myTurn = getActivePlayerId() === viewer;
+    const affordable = canAffordCost(DEV_CARD_COST, viewer);
+    const deckLeft = deckRemaining();
+    buy.disabled = !(phase === "main" && myTurn && affordable && deckLeft > 0);
+    const label = document.createElement("span");
+    label.textContent = "Buy dev card";
+    const cost = document.createElement("span");
+    cost.className = "cost";
+    for (const r of RESOURCE_ORDER) {
+      const n = DEV_CARD_COST[r] ?? 0;
+      for (let i = 0; i < n; i++) {
+        const img = document.createElement("img");
+        img.src = RESOURCE_ICONS[r];
+        img.alt = RESOURCE_LABELS[r];
+        cost.appendChild(img);
+      }
+    }
+    const deck = document.createElement("span");
+    deck.className = "deck-left";
+    deck.textContent = deckLeft > 0 ? `${deckLeft} in deck` : "deck empty";
+    buy.appendChild(label);
+    buy.appendChild(cost);
+    buy.appendChild(deck);
+    buy.addEventListener("click", buyDevCard);
+    activeRow.appendChild(buy);
+
+    // Only mount the played row when it has cards, so the bottom row sits on the
+    // resource-bar line when nothing's been played yet.
+    if (playedRow.childElementCount > 0) cardHand.appendChild(playedRow);
+    cardHand.appendChild(activeRow);
+
+    updateCardFanOverlap();
+  }
+
+  // Tighten each row's fan so its cards fit the bar's capped width: per row,
+  // compute the negative left-margin each card needs and expose it as
+  // --card-overlap on that row. 0 until cards would overflow, then just enough
+  // to fit; clamped so a readable sliver always shows. The bottom row reserves
+  // space for the buy button.
+  const CARD_W = 92; // compact card width (see .game-card in index.html)
+  function updateCardFanOverlap() {
+    if (!cardHand) return;
+    const avail0 = cardHand.clientWidth || 0;
+    for (const row of cardHand.querySelectorAll<HTMLElement>(".card-row")) {
+      const n = row.querySelectorAll(".game-card").length;
+      if (n <= 1) { row.style.setProperty("--card-overlap", "0px"); continue; }
+      // The active row carries the buy button (width + its left margin).
+      const buyReserve = row.classList.contains("active-row") ? 104 + 16 : 0;
+      const avail = Math.max(0, avail0 - buyReserve - 12);
+      const flat = n * CARD_W;
+      let overlap = 0;
+      if (flat > avail) overlap = -Math.min(CARD_W - 34, (flat - avail) / (n - 1));
+      row.style.setProperty("--card-overlap", `${Math.round(overlap)}px`);
+    }
+  }
+
+  function buyDevCard() {
+    const viewer = getViewerPlayerId();
+    if (getPhase() !== "main" || getActivePlayerId() !== viewer) return;
+    if (!canAffordCost(DEV_CARD_COST, viewer)) return;
+    if (deckRemaining() <= 0) return;
+    spendCost(DEV_CARD_COST, viewer);
+    for (const r of RESOURCE_ORDER) if ((DEV_CARD_COST[r] ?? 0) > 0) bumpResourceCellLoss(r, viewer);
+    const inst = drawDevCard(viewer, getTurnNumber());
+    // VP cards count immediately (exempt from the ready rule).
+    if (inst?.type === "victoryPoint") renderVictoryHud(viewer);
+    renderCardHand();
+    refreshPlayerStrip();
+  }
+
+  // --- Card detail / play modal ---
+  // Fill the detail card's VP row with `count` large victory-point icons (or
+  // hide it when the card grants none).
+  function setDetailVp(count: number) {
+    if (!cardDetailVp) return;
+    cardDetailVp.innerHTML = "";
+    cardDetailVp.classList.toggle("has-vp", count > 0);
+    for (let i = 0; i < count; i++) {
+      const img = document.createElement("img");
+      img.src = iconVictoryPointUrl;
+      img.alt = "victory point";
+      cardDetailVp.appendChild(img);
+    }
+  }
+
+  let detailInst: DevCardInstance | null = null;
+  function openCardDetail(inst: DevCardInstance) {
+    if (!cardDetailBackdrop || !cardDetailArt || !cardDetailTitle || !cardDetailRule || !cardDetailPlay) return;
+    detailInst = inst;
+    cardDetailArt.src = cardArtFor(inst);
+    cardDetailTitle.textContent = DEV_CARD_INFO[inst.type].title;
+    if (cardDetailKind) cardDetailKind.textContent = "Development Card";
+    setDetailVp(inst.type === "victoryPoint" ? 1 : 0);
+    cardDetailRule.innerHTML = "";
+    cardDetailRule.appendChild(cardRuleNode(inst.type));
+    const playable = canPlayDevCard(inst, getTurnNumber(), getPhase());
+    cardDetailPlay.style.display = inst.type === "victoryPoint" ? "none" : "";
+    cardDetailPlay.disabled = !playable;
+    cardDetailBackdrop.classList.remove("hidden");
+  }
+  function closeCardDetail() {
+    if (cardDetailBackdrop) cardDetailBackdrop.classList.add("hidden");
+    detailInst = null;
+  }
+
+  // Dev: open the detail modal read-only for any card type, with no Play action
+  // (detailInst stays null so the Play handler is inert). Used by the dev menu's
+  // card-preview entry to inspect every dev + achievement card's art and rules.
+  const DEV_PREVIEW_TYPES: DevCardType[] = ["knight", "victoryPoint", "roadBuilding", "yearOfPlenty", "monopoly"];
+  type PreviewKey = DevCardType | "achievementArmy" | "achievementRoad";
+  const PREVIEW_LABELS: Record<PreviewKey, string> = {
+    knight: "Knight (dev)",
+    victoryPoint: "Victory Point (dev)",
+    roadBuilding: "Road Building (dev)",
+    yearOfPlenty: "Year of Plenty (dev)",
+    monopoly: "Monopoly (dev)",
+    achievementArmy: "Largest Army (achievement)",
+    achievementRoad: "Longest Road (achievement)",
+  };
+  function previewCard(key: PreviewKey) {
+    if (!cardDetailBackdrop || !cardDetailArt || !cardDetailTitle || !cardDetailRule || !cardDetailPlay) return;
+    detailInst = null; // read-only: Play handler bails on null
+    cardDetailPlay.style.display = "none";
+    cardDetailRule.innerHTML = "";
+    if (key === "achievementArmy") {
+      cardDetailArt.src = ACHIEVEMENT_ART.army;
+      cardDetailTitle.textContent = "Largest Army";
+      if (cardDetailKind) cardDetailKind.textContent = "Achievement";
+      setDetailVp(2);
+      cardDetailRule.appendChild(achievementRuleNode("army"));
+    } else if (key === "achievementRoad") {
+      cardDetailArt.src = ACHIEVEMENT_ART.road;
+      cardDetailTitle.textContent = "Longest Road";
+      if (cardDetailKind) cardDetailKind.textContent = "Achievement";
+      setDetailVp(2);
+      cardDetailRule.appendChild(achievementRuleNode("road"));
+    } else {
+      // Knights have 5 artworks — pick a random one each preview so all are
+      // reachable by clicking Preview repeatedly (matches how real draws vary).
+      const knightArtIdx = key === "knight" ? Math.floor(Math.random() * DEV_CARD_ART.knight.length) : 0;
+      const inst: DevCardInstance = { type: key, boughtTurn: 0, knightArtIdx, played: false };
+      cardDetailArt.src = cardArtFor(inst);
+      cardDetailTitle.textContent = DEV_CARD_INFO[key].title;
+      if (cardDetailKind) cardDetailKind.textContent = "Development Card";
+      setDetailVp(key === "victoryPoint" ? 1 : 0);
+      cardDetailRule.appendChild(cardRuleNode(key));
+    }
+    cardDetailBackdrop.classList.remove("hidden");
+  }
+  cardDetailClose?.addEventListener("click", closeCardDetail);
+  cardDetailBackdrop?.addEventListener("click", (e) => { if (e.target === cardDetailBackdrop) closeCardDetail(); });
+  cardDetailPlay?.addEventListener("click", () => {
+    const inst = detailInst;
+    if (!inst) return;
+    if (!canPlayDevCard(inst, getTurnNumber(), getPhase())) return;
+    closeCardDetail();
+    playDevCard(inst);
+  });
+
+  // Dispatch a card's effect. markPlayed sets the one-per-turn flag (non-VP).
+  function playDevCard(inst: DevCardInstance) {
+    switch (inst.type) {
+      case "knight": {
+        markPlayed(inst);
+        refreshAchievements(); // played-knight count changed → maybe Largest Army
+        startRobberMovePhase();
+        refreshTopButtons();
+        renderCardHand();
+        showActionPrompt("Knight — move the robber");
+        render();
+        break;
+      }
+      case "roadBuilding": {
+        markPlayed(inst);
+        startDevRoadBuilding();
+        renderCardHand();
+        break;
+      }
+      case "yearOfPlenty": {
+        markPlayed(inst);
+        renderCardHand();
+        openYearOfPlenty();
+        break;
+      }
+      case "monopoly": {
+        markPlayed(inst);
+        renderCardHand();
+        openMonopoly();
+        break;
+      }
+      case "victoryPoint":
+        break; // never actively played
+    }
+  }
+
+  // --- Road Building: place 2 free roads via the dev-road placement step. ---
+  let devRoadsLeft = 0;
+  function startDevRoadBuilding() {
+    // Cap at how many legal edges actually exist (could be <2 in tight spots).
+    devRoadsLeft = 2;
+    setPlacementStep("dev-road");
+    showActionPrompt("Road Building — place 2 free roads", 4000);
+    refreshTopButtons();
+    render();
+  }
+  // Called by the canvas click handler after a dev-road bridge is placed.
+  function onDevRoadPlaced() {
+    devRoadsLeft--;
+    refreshAchievements(); // a new road may change Longest Road
+    // Bail out early if no legal edge remains for the next free road (tight
+    // boards / out of room) so the player isn't stuck in the placement state.
+    let stuck = false;
+    if (devRoadsLeft > 0) {
+      const layout = fitLayout(board, canvas.clientWidth, canvas.clientHeight);
+      stuck = validBridgeEdges(buildPlacementGraph(board, layout)).size === 0;
+    }
+    if (devRoadsLeft <= 0 || stuck) {
+      setPlacementStep("free");
+      showActionPrompt("Roads placed", 1600);
+    } else {
+      showActionPrompt(`Road Building — ${devRoadsLeft} road left`, 3000);
+    }
+    refreshTopButtons();
+  }
+
+  // --- Year of Plenty: pick 2 resources (repeats allowed) from the bank. ---
+  let yopPick: ResourceKind[] = [];
+  function openYearOfPlenty() {
+    if (!yopBackdrop || !yopRow) return;
+    yopPick = [];
+    yopRow.innerHTML = "";
+    for (const r of RESOURCE_ORDER) {
+      const btn = document.createElement("button");
+      btn.className = "trade-btn";
+      btn.type = "button";
+      btn.dataset.res = r;
+      const img = document.createElement("img");
+      img.src = RESOURCE_ICONS[r];
+      img.alt = RESOURCE_LABELS[r];
+      btn.appendChild(img);
+      // Stock badge so the player can see (and live-preview) their hand even
+      // though the resource HUD is hidden behind the modal.
+      const stock = document.createElement("span");
+      stock.className = "stock";
+      btn.appendChild(stock);
+      btn.title = RESOURCE_LABELS[r];
+      btn.addEventListener("click", () => {
+        if (yopPick.length >= 2) return;
+        yopPick.push(r);
+        refreshYop();
+      });
+      yopRow.appendChild(btn);
+    }
+    refreshYop();
+    yopBackdrop.classList.remove("hidden");
+  }
+  function refreshYop() {
+    if (yopCounter) yopCounter.textContent = yopPick.length === 0
+      ? "Pick 2 — 0 chosen"
+      : `Chosen: ${yopPick.map((r) => RESOURCE_LABELS[r]).join(", ")}`;
+    if (yopConfirm) yopConfirm.disabled = yopPick.length !== 2;
+    // Live-preview each button's stock = current hand + picks so far.
+    const hand = resourceCounts[getViewerPlayerId()];
+    if (yopRow) {
+      for (const btn of yopRow.querySelectorAll<HTMLElement>(".trade-btn")) {
+        const r = btn.dataset.res as ResourceKind | undefined;
+        if (!r) continue;
+        const have = hand ? hand[r] : 0;
+        const picked = yopPick.filter((p) => p === r).length;
+        const stock = btn.querySelector(".stock");
+        if (stock) stock.textContent = String(have + picked);
+        btn.classList.toggle("selected", picked > 0);
+      }
+    }
+  }
+  yopCancel?.addEventListener("click", () => yopBackdrop?.classList.add("hidden"));
+  yopConfirm?.addEventListener("click", () => {
+    if (yopPick.length !== 2) return;
+    const viewer = getViewerPlayerId();
+    const hand = resourceCounts[viewer];
+    if (hand) for (const r of yopPick) { hand[r] += 1; }
+    renderResourceHud(viewer);
+    for (const r of new Set(yopPick)) bumpResourceCell(r, viewer);
+    refreshPlayerStrip();
+    yopBackdrop?.classList.add("hidden");
+  });
+
+  // --- Monopoly: name a resource; collect it from every other player. ---
+  let monopolyPick: ResourceKind | null = null;
+  function openMonopoly() {
+    if (!monopolyBackdrop || !monopolyRow) return;
+    monopolyPick = null;
+    monopolyRow.innerHTML = "";
+    for (const r of RESOURCE_ORDER) {
+      const btn = document.createElement("button");
+      btn.className = "trade-btn";
+      btn.type = "button";
+      btn.dataset.res = r;
+      const img = document.createElement("img");
+      img.src = RESOURCE_ICONS[r];
+      img.alt = RESOURCE_LABELS[r];
+      btn.appendChild(img);
+      btn.title = RESOURCE_LABELS[r];
+      btn.addEventListener("click", () => {
+        monopolyPick = r;
+        for (const b of monopolyRow.querySelectorAll(".trade-btn")) b.classList.toggle("selected", (b as HTMLElement).dataset.res === r);
+        if (monopolyConfirm) monopolyConfirm.disabled = false;
+      });
+      monopolyRow.appendChild(btn);
+    }
+    if (monopolyCounter) monopolyCounter.textContent = "Pick 1 resource";
+    if (monopolyConfirm) monopolyConfirm.disabled = true;
+    monopolyBackdrop.classList.remove("hidden");
+  }
+  monopolyCancel?.addEventListener("click", () => monopolyBackdrop?.classList.add("hidden"));
+  monopolyConfirm?.addEventListener("click", () => {
+    if (!monopolyPick) return;
+    const r = monopolyPick;
+    const me = getViewerPlayerId();
+    const myHand = resourceCounts[me];
+    if (!myHand) return;
+    let taken = 0;
+    for (const p of getPlayers()) {
+      if (p.id === me) continue;
+      const h = resourceCounts[p.id];
+      if (!h) continue;
+      taken += h[r];
+      h[r] = 0;
+    }
+    myHand[r] += taken;
+    renderResourceHud(me);
+    if (taken > 0) bumpResourceCell(r, me);
+    refreshPlayerStrip();
+    monopolyBackdrop?.classList.add("hidden");
+    showActionPrompt(`Monopoly — took ${taken} ${RESOURCE_LABELS[r].toLowerCase()}`, 2600);
+  });
 
   // Guided action prompt — a centered banner that announces phase/turn
   // transitions ("Match started!", "P2 — roll the dice!"). Auto-fades after
@@ -1461,6 +2153,9 @@ async function main() {
   refreshTopButtons = () => {
     const phase = getPhase();
     const myTurn = getActivePlayerId() === getViewerPlayerId();
+    // Keep the card hand in sync with every phase/turn transition (ready state,
+    // playability, buy availability all depend on phase + active player).
+    renderCardHand();
     // Contextual bottom-bar actions. They share the right-of-HUD slot so the
     // player's eye lands on the same spot every turn. Trade hides during the
     // roll phase (you can't trade before rolling) — Roll takes its place;
@@ -1667,8 +2362,152 @@ async function main() {
     regen();
   });
 
+  // Dev: mock a robber steal so the fly/loss/gain animation can be triggered
+  // without setting up a real 7-roll + robber move. Repopulates the victim /
+  // robber selects from the live player list each time the panel is touched.
+  const mockStealVictim = document.getElementById("mockStealVictim") as HTMLSelectElement | null;
+  const mockStealRobber = document.getElementById("mockStealRobber") as HTMLSelectElement | null;
+  const mockStealBtn = document.getElementById("mockStealBtn") as HTMLButtonElement | null;
+  function refreshMockStealOptions() {
+    if (!mockStealVictim || !mockStealRobber) return;
+    const players = getPlayers();
+    for (const sel of [mockStealVictim, mockStealRobber]) {
+      const prev = sel.value;
+      sel.innerHTML = "";
+      for (const p of players) {
+        const opt = document.createElement("option");
+        opt.value = String(p.id);
+        opt.textContent = p.name ?? `P${p.id + 1}`;
+        sel.appendChild(opt);
+      }
+      if (players.some((p) => String(p.id) === prev)) sel.value = prev;
+    }
+    // Default robber to the viewer and victim to someone else so the very first
+    // click shows a card flying *into* the on-screen hand.
+    if (!mockStealRobber.value || mockStealRobber.value === mockStealVictim.value) {
+      mockStealRobber.value = String(getViewerPlayerId());
+      const other = players.find((p) => p.id !== getViewerPlayerId());
+      if (other) mockStealVictim.value = String(other.id);
+    }
+  }
+  refreshMockStealOptions();
+  // Rebuild the lists whenever a select is opened, so changing the player count
+  // (Players → Apply) is reflected without needing to click Mock steal first.
+  mockStealVictim?.addEventListener("mousedown", refreshMockStealOptions);
+  mockStealRobber?.addEventListener("mousedown", refreshMockStealOptions);
+  mockStealBtn?.addEventListener("click", () => {
+    refreshMockStealOptions();
+    const victimId = Number(mockStealVictim?.value ?? 0);
+    const robberId = Number(mockStealRobber?.value ?? 0);
+    if (victimId === robberId) { showActionPrompt("Mock steal: pick two different players."); return; }
+    const vHand = resourceCounts[victimId];
+    if (!vHand) return;
+    // Seed an empty victim with a small random spread so the mock always has
+    // something to fly — and so repeated clicks pull different resources rather
+    // than always wood.
+    const candidates: ResourceKind[] = [];
+    for (const k of RESOURCE_ORDER) for (let i = 0; i < vHand[k]; i++) candidates.push(k);
+    if (!candidates.length) {
+      const seedCount = 3 + Math.floor(Math.random() * 3); // 3–5 cards
+      for (let i = 0; i < seedCount; i++) {
+        const seed = RESOURCE_ORDER[Math.floor(Math.random() * RESOURCE_ORDER.length)];
+        vHand[seed] = (vHand[seed] ?? 0) + 1;
+        candidates.push(seed);
+      }
+      renderResourceHud(getViewerPlayerId());
+    }
+    const picked = candidates[Math.floor(Math.random() * candidates.length)];
+    spawnResourceSteal(picked, victimId, robberId);
+  });
+
+  // Dev: open the discard menu without rolling a 7. Stuffs the viewer's hand to
+  // 9 cards (so they owe 4) and starts a discard phase scoped to the viewer.
+  const mockDiscardBtn = document.getElementById("mockDiscardBtn") as HTMLButtonElement | null;
+  mockDiscardBtn?.addEventListener("click", () => {
+    const viewerId = getViewerPlayerId();
+    const hand = resourceCounts[viewerId];
+    if (!hand) return;
+    if (handTotal(viewerId) <= 7) {
+      // Top up to a spread of 9 so there's plenty to pick from.
+      const fill: [ResourceKind, number][] = [["wood", 3], ["brick", 2], ["sheep", 2], ["wheat", 1], ["stone", 1]];
+      for (const [k, n] of fill) hand[k] = Math.max(hand[k], n);
+      renderResourceHud(viewerId);
+      refreshPlayerStrip();
+    }
+    const owed = Math.floor(handTotal(viewerId) / 2);
+    startDiscardPhase([viewerId], new Map([[viewerId, owed]]));
+    openDiscardModal();
+    refreshTopButtons();
+    render();
+  });
+
+  // Dev: open the victim-chooser modal with every other player as a candidate,
+  // topping up empty hands so each shows a card count. Picking one runs a real
+  // steal animation into the viewer's hand.
+  const mockVictimChooserBtn = document.getElementById("mockVictimChooserBtn") as HTMLButtonElement | null;
+  mockVictimChooserBtn?.addEventListener("click", () => {
+    const robberId = getViewerPlayerId();
+    const victims = getPlayers().map((p) => p.id).filter((id) => id !== robberId);
+    if (victims.length < 2) { showActionPrompt("Mock victim chooser: need 3+ players."); return; }
+    for (const vid of victims) {
+      const h = resourceCounts[vid];
+      if (h && handTotal(vid) === 0) { h.wood += 1; }
+    }
+    refreshPlayerStrip();
+    openStealModal(victims, (victimId) => {
+      const vHand = resourceCounts[victimId];
+      if (!vHand) return;
+      const candidates: ResourceKind[] = [];
+      for (const k of RESOURCE_ORDER) for (let i = 0; i < vHand[k]; i++) candidates.push(k);
+      if (!candidates.length) return;
+      const picked = candidates[Math.floor(Math.random() * candidates.length)];
+      spawnResourceSteal(picked, victimId, robberId);
+    });
+  });
+
+  // Dev: preview any card type (dev cards + achievements) in the detail modal.
+  const previewCardType = document.getElementById("previewCardType") as HTMLSelectElement | null;
+  const previewCardBtn = document.getElementById("previewCardBtn") as HTMLButtonElement | null;
+  if (previewCardType) {
+    const keys: PreviewKey[] = [...DEV_PREVIEW_TYPES, "achievementArmy", "achievementRoad"];
+    for (const k of keys) {
+      const opt = document.createElement("option");
+      opt.value = k;
+      opt.textContent = PREVIEW_LABELS[k];
+      previewCardType.appendChild(opt);
+    }
+  }
+  previewCardBtn?.addEventListener("click", () => {
+    if (previewCardType) previewCard(previewCardType.value as PreviewKey);
+  });
+
+  // Dev: grant the viewer a dev card (no resource cost, doesn't touch the deck).
+  // Stamped a turn earlier so it's immediately "ready" to play/test.
+  const grantCardType = document.getElementById("grantCardType") as HTMLSelectElement | null;
+  const grantCardBtn = document.getElementById("grantCardBtn") as HTMLButtonElement | null;
+  if (grantCardType) {
+    for (const k of DEV_PREVIEW_TYPES) {
+      const opt = document.createElement("option");
+      opt.value = k;
+      opt.textContent = DEV_CARD_INFO[k].title;
+      grantCardType.appendChild(opt);
+    }
+  }
+  grantCardBtn?.addEventListener("click", () => {
+    if (!grantCardType) return;
+    const type = grantCardType.value as DevCardType;
+    // boughtTurn = current-1 so the card is ready right away (or turn 1 minimum).
+    const readyTurn = Math.max(0, getTurnNumber() - 1);
+    const inst = grantDevCard(getViewerPlayerId(), type, readyTurn);
+    if (inst.type === "victoryPoint") renderVictoryHud(getViewerPlayerId());
+    renderCardHand();
+    refreshPlayerStrip();
+  });
+
+  resetDevCards(); // build the initial shuffled deck on first load
   refreshPlayerStrip();
   refreshTopButtons();
+  renderCardHand();
 
   // Sandbox by default — user clicks "start match" to begin the pre-match
   // dice roll. resetTurnState() leaves us in "pre-match" phase.
